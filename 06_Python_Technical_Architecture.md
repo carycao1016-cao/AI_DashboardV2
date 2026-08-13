@@ -648,6 +648,8 @@ Adapters may include:
 
 Unknown layouts use a general detector. Low confidence routes to Review rather than failing the entire workbook.
 
+An AI proposal with medium confidence is accepted without manual Review when deterministic validation confirms its source range, non-overlapping regions, Header mapping, numeric extraction, explicit Base where present, and significance mapping where present. The accepted table is included in risk-weighted Quick Data Validation. Invalid proposals, unresolved conflicts and failed validation samples route to Review; Review must remain an exception path rather than the normal ingestion workflow.
+
 ---
 
 ## 14. Header and Banner Parsing
@@ -674,6 +676,8 @@ Every result column receives a full path such as:
 ```text
 US -> Gender -> Male
 ```
+
+MVP supports one to three Header levels natively. Each physical table owns its complete Header paths, so different tables may use different Banner structures. Preserve deeper paths and raw layout evidence, but mark them as `header_depth_exceeds_mvp` and prevent automatic cross-table linking, Banner comparison, complex visuals and publication until confirmed.
 
 ### 14.3 Significance column codes
 
@@ -725,9 +729,23 @@ Link Count, Percentage, Mean and Significance variants using:
 
 Physical tables remain independently traceable to their Sheet and source range. After extraction, compatible variants may be linked to one semantic question even when they occur at different Sheet positions or use different layouts. Linking must retain each variant's own metric type, source bindings and significance schema.
 
+Automatic variant linking is intentionally strict. Table title, question number, normalized option content and complete Header paths must each match exactly; Market, Wave and Base definitions must also match. Normalization may remove only leading/trailing and repeated whitespace, line breaks, tabs, full-width/half-width spaces, non-semantic invisible characters and Unicode representation differences. It must not ignore punctuation, case, language, bracket content, units, question-code prefixes or business text.
+
+Count, Percentage and official-significance variants may be linked only when their metrics are complementary. A significance variant may contain auxiliary marker rows or columns, but its business value columns must map one-to-one to the matched table. Sheet name, physical position, formatting and approximate text similarity are not identity evidence. Any mismatch retains independent physical tables.
+
+For a verified repeated Count/Percentage pattern within one physical table, produce one combined extraction with separate metric blocks and source coordinates; do not create an artificial cross-table link.
+
 ### 15.4 Unknown metric
 
 Store as `unknown`, retain original label and allow Creator confirmation.
+
+### 15.5 Value parsing and CSV encoding
+
+Keep Excel stored values and displayed values separately. Only normalize a value into a calculation-ready number when the source format and row context prove its unit. Preserve unavailable symbols and render them as `-` to clients without ever converting them to zero. Represent `<1%` as a bound, not `0.01`; bound values cannot enter exact calculations or ordering.
+
+Parse `*` and `**` as source qualifiers such as `small_base` and `very_small_base` only when supported by source notes. They restrict significance wording and high-risk interpretation but do not make the numeric value unavailable.
+
+For CSV ingestion, preserve original bytes and try approved encodings including UTF-8, UTF-8 BOM, GB18030, GBK and Big5. Record the selected encoding and confidence using reversibility, replacement-character rate and expected CJK/Latin text validity. Low-confidence decoding must not send damaged text to AI or use it for identity matching, publication or automatic variant linking; the Creator may specify an encoding or re-export UTF-8.
 
 ---
 
@@ -1342,6 +1360,8 @@ One semantic object, multiple localized display resources.
 - Validate required publication coverage.
 - Build Published Localization Package.
 
+Creator-supplied translation files are a first-class source and take priority over AI translation Drafts. AI translation binds to stable domain object IDs and must preserve protected tokens, numeric values, question codes, significance labels, formulas and source references.
+
 ### 31.3 Translation memory
 
 Use Project-level confirmed terminology first.
@@ -1362,6 +1382,8 @@ Check protected tokens:
 - Units.
 - Significance meaning.
 - Base definitions.
+
+An AI-translated locale is publishable only after an explicit Creator release choice accepting AI Draft translations. Without that choice, the release includes only locales satisfying the configured confirmed-translation policy. Record this choice in the publication audit.
 
 ---
 

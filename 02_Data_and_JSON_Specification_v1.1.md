@@ -842,6 +842,14 @@ The `label_map` maps the supplied label to an `extracted_header_id`, not to an E
 
 An unknown or incomplete mapping retains the original marker and creates a Review issue. The system must not guess missing labels or derive statistical direction from a letter marker.
 
+### 13.5 Header depth and automatic acceptance
+
+MVP natively supports one to three Header levels per physical table. Each `ExtractedTable` owns its Header paths; different tables are not required to use the same Banner structure.
+
+If a table has more than three Header levels, extraction preserves every original Header cell, merged range and complete path, and adds `header_depth_exceeds_mvp` as a warning. The table cannot automatically participate in cross-table variant linking, Banner comparison, complex visuals or publication until confirmed.
+
+An AI boundary proposal with medium confidence may be accepted without manual Review when deterministic validation passes for the boundary, Header mapping, explicit Base where present, numeric extraction, significance mapping where present, and table identity conflicts. Accepted medium-confidence tables must receive elevated risk weight in Quick Data Validation. Review is an exception path for validation failures, conflicts, unknown formats and validation-sample failures, not the normal extraction path.
+
 ---
 
 ## 14. Extracted Header
@@ -991,6 +999,43 @@ For an inline value such as `20%ABC`, extraction preserves the original text whi
 ```
 
 The parser may split a marker only after the parent table's label map is available. If a marker cannot be mapped completely, the original display text remains authoritative and the cell requires Review.
+
+### 16.3 Numeric parsing and qualifiers
+
+Extraction preserves `raw_value`, `excel_display_value`, `parsed_value`, `parsed_unit`, `precision_source` and `availability_status`. `parsed_value` is written only when the source value, display format and table context provide sufficient deterministic evidence; the parser must not guess whether an unformatted `20` means a Count, Percentage or other measure.
+
+For a source display such as `<1%`, use a constraint rather than a fabricated exact value:
+
+```json
+{
+  "excel_display_value": "<1%",
+  "parsed_value": null,
+  "parsed_unit": "percentage",
+  "value_constraint": {
+    "operator": "less_than",
+    "upper_bound": 0.01
+  },
+  "availability_status": "available"
+}
+```
+
+Constrained values may be displayed using their original text but must not participate in exact sorting, differences, comparisons or formulas.
+
+For a source value such as `60*` or `18**`, retain the display text and parse the numeric portion only when unambiguous:
+
+```json
+{
+  "excel_display_value": "18**",
+  "parsed_value": 18,
+  "parsed_unit": "count",
+  "source_qualifiers": ["very_small_base"],
+  "availability_status": "available"
+}
+```
+
+`*` maps to `small_base` and `**` maps to `very_small_base` when supported by the source footnote. Qualifiers restrict automatic significance wording, Insight generation and high-risk comparisons, but do not convert the value to zero or unavailable.
+
+Where a physical table repeats a verified Count row followed by a Percentage row for the same option and Header columns, it may use `table_variant: "combined"`. Each metric keeps separate source cells and official results. This requires a stable repeated pattern, matching data columns and unambiguous Count/Percentage formats; otherwise extraction retains independent rows and requires Review.
 
 ---
 
@@ -1561,6 +1606,8 @@ Internal view may retain letters. Client view uses one of:
   "full_statistical_detail"
 ]
 ```
+
+If official significance is absent, the result may be published without a significance display. If markers exist but mapping is unresolved, numerical results may be published with significance hidden. Published visuals, Insights and AI answers must not claim statistical significance for unresolved markers.
 
 ---
 
@@ -2537,6 +2584,8 @@ All user-facing semantic text should support a common localized-text structure:
 ]
 ```
 
+`source_provided` includes a translation imported from a Creator-supplied translation file. It has priority over `ai_translated`. A Creator-confirmed or Creator-reviewed translation has priority over all AI output.
+
 ### 49.4 Source, canonical and display labels
 
 Objects that carry research labels should retain:
@@ -2671,6 +2720,10 @@ If the requested language is missing:
 1. Use the configured fallback only when allowed.
 2. Record the fallback event internally.
 3. Block bilingual publication if required translation coverage is below the release threshold.
+
+For a Chinese-source workbook, the Creator may upload an English translation file or request an AI translation Draft. AI translation never changes numeric values, question codes, significance labels, formulas or source coordinates. It is bound to the stable object ID of the question, option, Header, Base, Insight or other display object, not matched back by source text alone.
+
+An English release containing `ai_translated` content requires an explicit, auditable Creator publication choice to accept AI Draft translations. Without that choice, only language versions meeting the configured confirmed-translation policy may be published.
 
 ### 49.10 Translation audit
 
@@ -2809,6 +2862,10 @@ Required release checks:
 - Published Insights are supported.
 - No Internal content is included.
 - Client sharing settings are valid.
+
+Publication evaluates each visual and result independently. A result with unparsed numeric content, unresolved Header mapping, missing source lineage, source conflict or invalid variant merge is excluded from the release together with dependent visuals and Insights. The remaining verified Dashboard content may be published, and the Creator receives an explicit exclusion report. The gate blocks the entire release only when no publishable client content remains, a global security/sharing rule fails, or the Creator has configured an excluded item as mandatory.
+
+Base is displayed only when it is explicitly extracted from the physical table. The platform must not inherit, infer or display a Base from a prior table or another Sheet. Results without an explicit Base may be published only for use cases that do not require Base comparability, significance interpretation or Base-dependent calculations.
 
 ---
 
