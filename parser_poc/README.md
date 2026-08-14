@@ -6,8 +6,15 @@ It deliberately does **not** identify tables, infer question numbers/Base rows, 
 
 ## Run
 
+The PoC requires Python 3.12. Create an isolated environment with your approved Python 3.12 distribution, then install the declared dependencies:
+
 ```bash
-python3 parser_poc/workbook_scan.py \
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -e .
+```
+
+```bash
+.venv/bin/python parser_poc/workbook_scan.py \
   "PoC/Quantum Tab/Tabs_N+%.xlsx" \
   --output /tmp/tabs_n_scan.json
 ```
@@ -40,5 +47,5 @@ The orchestrator currently validates physical bounds and declared region overlap
 ## Tests
 
 ```bash
-python3 -m unittest discover -s parser_poc/tests -v
+.venv/bin/python -m unittest discover -s parser_poc/tests -v
 ```

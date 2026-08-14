@@ -10,6 +10,7 @@
 - Added five required fields to `PoC/Golden_Annotation_Template.xlsx` and populated the existing example.
 - Updated the offline scanner's default Outline budget to 64k/70k, while retaining CLI configuration.
 - Added Pydantic two-layer contracts, a controlled provider-neutral Stub, a physical validation shell and a status-only Golden evaluator.
+- Added the Python 3.12 project baseline and declared PoC dependencies in `pyproject.toml`.
 
 ## Current Git Checkpoint
 
