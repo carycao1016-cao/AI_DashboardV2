@@ -11,6 +11,7 @@
 - Updated the offline scanner's default Outline budget to 64k/70k, while retaining CLI configuration.
 - Added Pydantic two-layer contracts, a controlled provider-neutral Stub, a physical validation shell and a status-only Golden evaluator.
 - Added the Python 3.12 project baseline and declared PoC dependencies in `pyproject.toml`.
+- Added the first 20 source-backed standard Golden tables: 10 Decipher and 10 Quantum, with three Cell Truth samples per table.
 
 ## Current Git Checkpoint
 
@@ -18,11 +19,11 @@ Create a commit after the final test run for only the intentional files listed i
 
 ## Next Work Item
 
-Prepare the first evidence-backed Golden set and connect it to the offline evaluator:
+Extend and validate the first evidence-backed Golden set:
 
-1. Annotate 20-30 physical tables across Quantum and Decipher using the existing template fields.
-2. Add Cell Truth samples and expected significance-layout/validation statuses for every annotated table.
-3. Supply controlled Stub fixtures for the annotated ranges and run the status-only evaluator against both source families.
+1. Review the 20 generated standard annotations and add special tables for significance layouts, deeper Headers, missing Base and ambiguous regions.
+2. Supply controlled Stub fixtures for the annotated ranges and run the status-only evaluator against both source families.
+3. Add Cell Truth samples for the special cases and measure the four agreed Golden gates.
 4. Only after the baseline is stable, add one configured external provider adapter and compare it with the same Golden report.
 
 ## Guardrails
