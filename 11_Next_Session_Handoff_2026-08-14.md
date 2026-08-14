@@ -9,6 +9,7 @@
 - Updated data and architecture specifications with Layer 1/2 payload boundaries, continuation limits, validation outcomes, provider-neutral structured-generation adapter and Golden thresholds.
 - Added five required fields to `PoC/Golden_Annotation_Template.xlsx` and populated the existing example.
 - Updated the offline scanner's default Outline budget to 64k/70k, while retaining CLI configuration.
+- Added Pydantic two-layer contracts, a controlled provider-neutral Stub, a physical validation shell and a status-only Golden evaluator.
 
 ## Current Git Checkpoint
 
@@ -16,12 +17,12 @@ Create a commit after the final test run for only the intentional files listed i
 
 ## Next Work Item
 
-Build the provider-neutral orchestration shell around the existing scanner:
+Prepare the first evidence-backed Golden set and connect it to the offline evaluator:
 
-1. Define Pydantic schemas for Layer 1 response, Detail Window request, Layer 2 proposal and validation report.
-2. Implement a controlled stub adapter before connecting any external model.
-3. Convert the Golden template into the first 20-30 physical-table annotations and create a status-only evaluator.
-4. Run the evaluator against Quantum and Decipher fixtures before enabling a real provider.
+1. Annotate 20-30 physical tables across Quantum and Decipher using the existing template fields.
+2. Add Cell Truth samples and expected significance-layout/validation statuses for every annotated table.
+3. Supply controlled Stub fixtures for the annotated ranges and run the status-only evaluator against both source families.
+4. Only after the baseline is stable, add one configured external provider adapter and compare it with the same Golden report.
 
 ## Guardrails
 

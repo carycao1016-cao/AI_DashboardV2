@@ -16,6 +16,14 @@ Use `--sheet` to scan one Sheet and `--target-tokens` / `--hard-tokens` to exper
 
 Use one or more `--detail-range start:end` arguments with `--sheet` to build second-pass Detail Windows from AI-proposed coarse ranges. Detail Window context and grouping are configurable with `--detail-context-before`, `--detail-context-after`, and `--max-candidate-gap-rows`.
 
+## Two-layer contract shell
+
+- `contracts.py` defines Pydantic contracts for Layer 1 response, Detail Window request, Layer 2 proposal and Python validation result.
+- `orchestration.py` contains a provider-neutral adapter protocol and `ControlledStubAdapter`. The Stub returns only explicitly supplied fixtures; it does not infer a table or call a model.
+- `golden_evaluation.py` reads structural fields from `Golden_Annotation_Template.xlsx` and emits aggregate coverage and validation statuses without question text, labels or numeric values.
+
+The orchestrator currently validates physical bounds and declared region overlap only. It is intentionally not a value extractor, a significance mapper or a production acceptance engine.
+
 ## Current rules implemented
 
 - First-pass Outline rows retain only A-column/first-non-empty text and row-level counts. They are sent using one `row_schema` plus compact positional arrays to avoid repeating JSON keys. No semantic signal, candidate-table heuristic or per-cell sample is generated before AI review.
