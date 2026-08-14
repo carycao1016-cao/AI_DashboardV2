@@ -1,0 +1,4 @@
+.DS_Store
+parser_poc/output/
+__pycache__/
+*.pyc

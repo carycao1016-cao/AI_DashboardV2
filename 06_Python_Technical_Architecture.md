@@ -2,9 +2,9 @@
 ## Python Technical Architecture & Delivery Plan
 
 **Document ID:** `06_Python_Technical_Architecture`  
-**Version:** v1.0  
+**Version:** v1.1
 **Status:** Initial technical architecture specification  
-**Date:** 13 August 2026  
+**Date:** 14 August 2026
 **Primary backend language:** Python  
 **Supported product languages:** English (`en`) and Simplified Chinese (`zh-CN`)  
 **Related documents:**  
@@ -543,12 +543,10 @@ Upload finalization and ingestion-start endpoints accept idempotency keys.
 
 ```text
 Workbook scan
--> Sheet classification
--> Cell-grid extraction
--> Style and merge extraction
--> Candidate table segmentation
--> Bounded WorkbookScanSummary generation
--> AI TableBoundaryProposal for ambiguous candidates
+-> Layer 1 bounded SheetOutline generation
+-> AI coarse range proposal
+-> Layer 2 DetailWindow generation for proposed ranges
+-> AI exact TableBoundaryProposal
 -> Deterministic BoundaryValidationResult
 -> Table structure parsing
 -> Header hierarchy parsing
@@ -591,31 +589,31 @@ Use cached formula values when available. If a required formula result has no ca
 
 ## 13. Table Detection
 
-### 13.1 Hybrid approach
+### 13.1 Two-stage AI-assisted detection
 
-Use:
+Generic Tab Books use two AI layers with Python as the factual reader and final validator.
 
-- Deterministic layout rules.
-- Pattern scoring.
-- Workbook-format adapters.
-- AI semantic assistance where necessary.
+Layer 1 creates a compact `SheetOutline` from observable facts only: Sheet metadata; A-column value or first non-empty value; row density; non-empty column span; text, numeric and percentage-like counts; blank row ranges; merged ranges; and hidden metadata. It does not send per-cell samples, display formats, formulas, styles, inferred questions, inferred Base rows or Python table candidates. The AI returns coarse ranges and one dispatch status: `complete`, `needs_more_context`, `ambiguous`, or `not_a_table`.
 
-For generic Tab Books, Python first constructs a bounded `WorkbookScanSummary` from physical evidence. The summary includes Sheet metadata, row-density and type signatures, merged and hidden regions, candidate question/Base rows, A-column and first-non-empty-cell clues, and limited contextual samples. A-column evidence is prioritized but never required.
+Layer 2 creates `DetailWindow` payloads only for Layer 1 ranges. A Detail Window exposes up to six position-based samples per non-empty row, including source coordinate, raw and best-available display value, type, number format and formula-state facts. Default before/after context is 20 rows and is configurable. Nearby candidates within a configurable 20-row gap may share one request while preserving distinct identities. The AI returns absolute table and region coordinates; it never returns final numeric results, makes significance claims or replaces source evidence.
 
-AI may return a structured `TableBoundaryProposal` for ambiguous candidate ranges. It proposes ranges and region roles only; it does not supply final numeric values or replace source evidence. Python re-reads the original cells and writes a `BoundaryValidationResult` before creating an `ExtractedTable`.
+For continuation, the AI may ask for at most 100 extra rows on either side and at most two continuations total. Fixed chunks and overlaps are only transport controls, not table-boundary evidence.
 
-### 13.2 Candidate features
+Python re-reads original cells at the proposed coordinates, validates them, performs only permitted low-risk physical corrections and writes a `BoundaryValidationResult` before creating an `ExtractedTable`. It may not infer a boundary, question row or Base row before AI review, silently fill a missing Base, merge unrelated tables or use confidence alone as acceptance evidence.
 
-- Non-empty density.
-- Merged title regions.
-- Repeated question-number patterns.
-- Base labels.
-- Header depth changes.
-- Data-type transitions.
-- Blank separators.
-- Border and fill changes.
-- Repeated page headers.
-- Footnote patterns.
+### 13.2 Context budgets and provider adapter
+
+Outline and Detail token budgets are deployment configuration, not business rules. The chosen provider must support the required structured JSON output and configured context capacity; long-context Outline dispatch should minimise request count without exceeding its hard per-request limit. The PoC records estimated input tokens for each payload so cost, latency and Golden accuracy can be evaluated together.
+
+The provider boundary is intentionally neutral:
+
+```python
+class StructuredGenerationAdapter(Protocol):
+    def generate_structured(self, payload: dict, output_schema: dict) -> dict:
+        ...
+```
+
+No extraction-domain module imports a provider SDK or hardcodes a model name. Provider selection must be evaluated on context capacity, strict JSON reliability, low-temperature control, data residency and retention policy, auditability, cost, and Golden outcomes. Difficult exceptions may use a higher-quality configured model, but the same contracts and validation apply.
 
 ### 13.3 Parser adapter interface
 
@@ -648,7 +646,7 @@ Adapters may include:
 
 Unknown layouts use a general detector. Low confidence routes to Review rather than failing the entire workbook.
 
-An AI proposal with medium confidence is accepted without manual Review when deterministic validation confirms its source range, non-overlapping regions, Header mapping, numeric extraction, explicit Base where present, and significance mapping where present. The accepted table is included in risk-weighted Quick Data Validation. Invalid proposals, unresolved conflicts and failed validation samples route to Review; Review must remain an exception path rather than the normal ingestion workflow.
+Python returns one of `accepted`, `adjusted`, `rejected`, or `review_required` for every AI proposal. It may adjust only blank external edges, required merged title/Header extents, obvious terminal coordinate bounds, verified adjacent significance rows/columns and verified trailing footnotes. A medium-confidence proposal may be accepted without manual Review only when deterministic validation confirms source range, non-overlapping regions, Header mapping, numeric extraction, explicit Base where present, significance mapping where present, and no identity conflict. The accepted table is included in risk-weighted Quick Data Validation. Invalid proposals, unresolved conflicts and failed validation samples route to Review; Review remains an exception path rather than the normal ingestion workflow.
 
 ---
 
@@ -2136,7 +2134,11 @@ Useful for:
 
 ### 55.3 Golden Workbook tests
 
-Run extraction and semantic comparison against truth fixtures.
+Run extraction and semantic comparison against truth fixtures. The first fixture set contains 20-30 annotated physical tables, not complete workbooks, and includes Quantum, Decipher, multiple significance layouts, alternating Count/Percentage rows, merged and unmerged Headers, missing Base, question text outside A, Header depth above three and complex/error regions.
+
+Each table fixture records exact table/title/Header/Base/data/footnote/significance coordinates and three to five Cell Truth samples. Layer 1 is successful only when every Golden table is covered by a coarse candidate, full range or valid continuation. Layer 2 is scored after Python validation, not on raw model coordinates.
+
+For the first release, require 100% Layer 1 coverage with zero missed tables, at least 95% Layer 2 final exact-structure accuracy, zero incorrect auto-accepts, and no more than 10% `review_required` tables. Write a status-only evaluation artifact for every run, with Layer 1 coverage/misses/status/unclassified-reason distributions, Layer 2 window/candidate-status distributions, validation outcomes, and source-family/Sheet/Header-depth/significance-layout breakdowns. Do not place business content in this report.
 
 ### 55.4 Contract tests
 
