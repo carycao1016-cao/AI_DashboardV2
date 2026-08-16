@@ -80,6 +80,16 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(252, 197, 59
 .icon-button.dark:hover { color: #fff; background: #3a3a36; }
 .avatar-button { width: 30px; height: 30px; color: var(--color-primary-bg); background: var(--color-ai-accent); border-radius: 50%; font-size: 10px; font-weight: 800; }
 .workspace-scroll { width: min(1500px, 100%); margin: 0 auto; padding: 32px; }
+.standalone-view { min-height: calc(100vh - 128px); }
+.standalone-card { padding: 22px; }
+.review-detail-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, .7fr); gap: 16px; }
+.risk-explanation { align-self: start; padding: 22px; background: var(--color-ai-callout-bg); border: 1px solid #f2d99c; border-left: 3px solid var(--color-ai-accent); border-radius: var(--radius-sm); }
+.risk-explanation h2 { margin-top: 9px; }
+.risk-explanation p { margin: 9px 0 18px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; }
+.empty-workflow { min-height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; text-align: center; }
+.empty-icon { width: 46px; height: 46px; display: grid; place-items: center; color: #8b6710; background: var(--color-ai-callout-bg); border: 1px solid #f2d99c; border-radius: 50%; }
+.empty-workflow h2 { margin-top: 15px; }
+.empty-workflow p { max-width: 470px; margin: 8px 0 18px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; }
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
 .eyebrow, .section-kicker { color: var(--color-text-secondary); font-size: 10px; font-weight: 700; letter-spacing: .12em; }
 h1, h2, p { margin: 0; }
@@ -262,6 +272,7 @@ h2 { margin-top: 5px; font-size: 18px; letter-spacing: -.01em; }
   .user-row { justify-content: center; padding-left: 0; padding-right: 0; }
   .page-header { align-items: flex-start; flex-direction: column; }
   .content-grid { grid-template-columns: 1fr; }
+  .review-detail-grid { grid-template-columns: 1fr; }
   .assistant-capsule.is-open { right: 20px; bottom: 78px; }
   .assistant-drawer { width: min(380px, calc(100vw - 64px)); }
   .assistant-visible .workspace { margin-right: 0; }

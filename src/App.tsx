@@ -28,6 +28,7 @@ import {
 import { uiConfig } from "./config";
 
 type Status = "已验证" | "需 Review" | "处理中";
+type WorkflowView = "overview" | "versions" | "processing" | "review" | "explorer" | "dashboard";
 
 type TableRow = {
   label: string;
@@ -67,12 +68,12 @@ const initialFileVersions: FileVersion[] = [
 ];
 
 const workflow = [
-  { label: "项目概览", icon: LayoutDashboard, state: "complete" },
-  { label: "文件与版本", icon: FileSpreadsheet, state: "complete" },
-  { label: "识别进度", icon: Gauge, state: "in_progress" },
-  { label: "Review Summary", icon: ShieldCheck, state: "warning" },
-  { label: "Data Explorer", icon: Database, state: "complete" },
-  { label: "Dashboard Draft", icon: BarChart3, state: "not_started" },
+  { id: "overview" as WorkflowView, label: "项目概览", icon: LayoutDashboard, state: "complete" },
+  { id: "versions" as WorkflowView, label: "文件与版本", icon: FileSpreadsheet, state: "complete" },
+  { id: "processing" as WorkflowView, label: "识别进度", icon: Gauge, state: "in_progress" },
+  { id: "review" as WorkflowView, label: "Review Summary", icon: ShieldCheck, state: "warning" },
+  { id: "explorer" as WorkflowView, label: "Data Explorer", icon: Database, state: "complete" },
+  { id: "dashboard" as WorkflowView, label: "Dashboard Draft", icon: BarChart3, state: "not_started" },
 ];
 
 function StatusBadge({ status }: { status: Status }) {
@@ -97,6 +98,7 @@ export function App() {
   const [uploadMode, setUploadMode] = useState<"append" | "replace">("append");
   const [replaceVersionId, setReplaceVersionId] = useState("sfv_002");
   const [fileVersions, setFileVersions] = useState<FileVersion[]>(initialFileVersions);
+  const [activeView, setActiveView] = useState<WorkflowView>("overview");
 
   const createProject = () => {
     const nextName = draftProjectName.trim();
@@ -147,8 +149,8 @@ export function App() {
         <button className="new-project-button" onClick={() => setShowProjectCreate(true)}><Plus size={15} /><span>新建项目</span></button>
         <nav className="workflow-nav">
           <div className="sidebar-label">工作流</div>
-          {workflow.map(({ label, icon: Icon, state }) => (
-            <button key={label} className={`nav-item ${label === "项目概览" ? "active" : ""}`}>
+          {workflow.map(({ id, label, icon: Icon, state }) => (
+            <button key={label} className={`nav-item ${activeView === id ? "active" : ""}`} onClick={() => setActiveView(id)}>
               <Icon size={17} /><span>{label}</span>{state === "warning" && <span className="nav-count">3</span>}
             </button>
           ))}
@@ -166,6 +168,7 @@ export function App() {
           <div className="topbar-actions"><span className="saved-state"><Check size={14} />已保存</span><button className="icon-button" title="帮助"><CircleHelp size={18} /></button><button className="avatar-button">CC</button></div>
         </header>
         <div className="workspace-scroll">
+          {activeView === "overview" ? <>
           <section className="page-header">
             <div><div className="eyebrow">CREATOR WORKSPACE · {projectName.toUpperCase()} / {marketScope.toUpperCase()} / {waveScope.toUpperCase()}</div><h1>项目概览</h1><p>查看上传版本、表格识别状态和当前需要处理的结构问题。</p></div>
             <div className="page-actions"><button className="button secondary" onClick={() => setShowUpload(true)}><Upload size={16} />上传新版本</button><button className="button primary"><Sparkles size={16} />开始识别</button></div>
@@ -206,6 +209,7 @@ export function App() {
             <div className="data-preview" role="table" aria-label="表格预览"><div className="data-row data-head"><span>选项</span><span>Total (A)</span><span>Male (B)</span><span>Female (C)</span><span>来源</span></div>{tableRows.map((row) => <div className="data-row" key={row.label}><strong>{row.label}</strong><span>{row.total}</span><span>{row.male} {row.maleSig && <em className="sig-marker">{row.maleSig}</em>}</span><span>{row.female} {row.femaleSig && <em className="sig-marker">{row.femaleSig}</em>}</span><span className="mono-cell source-cell">{row.source}</span></div>)}</div>
             <div className="table-note"><span><ShieldCheck size={14} />Python 已从源文件回读；AI 只提供结构建议</span><span><span className="legend-dot" />`-`、0 和不可用值保持区分</span></div>
           </section>
+          </> : <WorkflowPanel activeView={activeView} fileVersions={fileVersions} setShowUpload={setShowUpload} selectedSheet={selectedSheet} setSelectedSheet={setSelectedSheet} />}
         </div>
       </main>
 
@@ -220,6 +224,18 @@ export function App() {
 
 function SummaryCard({ label, value, meta, icon, tone }: { label: string; value: string; meta: string; icon: React.ReactNode; tone: string }) {
   return <div className={`summary-card tone-${tone}`}><div className="summary-icon">{icon}</div><span>{label}</span><strong>{value}</strong><small>{meta}</small></div>;
+}
+
+function WorkflowPanel({ activeView, fileVersions, setShowUpload, selectedSheet, setSelectedSheet }: { activeView: Exclude<WorkflowView, "overview">; fileVersions: FileVersion[]; setShowUpload: (open: boolean) => void; selectedSheet: string; setSelectedSheet: (sheet: string) => void }) {
+  const panelCopy: Record<Exclude<WorkflowView, "overview">, { kicker: string; title: string; description: string }> = {
+    versions: { kicker: "SOURCE FILE VERSIONS", title: "文件与版本", description: "管理追加文件和同一逻辑数据集的修正版，历史来源不会被覆盖。" },
+    processing: { kicker: "PROCESSING STATUS", title: "识别进度", description: "当前没有正在运行的识别任务；启动真实任务后，这里显示阶段和后台处理状态。" },
+    review: { kicker: "REVIEW SUMMARY", title: "Review Summary", description: "问题按风险分级展示；未确认的范围、Wave 或结构分类不会静默发布。" },
+    explorer: { kicker: "DATA EXPLORER", title: "Data Explorer", description: "按 Sheet、物理表和来源坐标浏览已通过 Python 回读的结果。" },
+    dashboard: { kicker: "DASHBOARD DRAFT", title: "Dashboard Draft", description: "Dashboard Builder 将在语义模型和发布门禁接入后启用。" },
+  };
+  const copy = panelCopy[activeView];
+  return <section className="standalone-view"><div className="page-header"><div><div className="eyebrow">{copy.kicker} · CREATOR WORKSPACE</div><h1>{copy.title}</h1><p>{copy.description}</p></div>{activeView === "versions" && <button className="button primary" onClick={() => setShowUpload(true)}><Plus size={16} />追加文件</button>}</div>{activeView === "versions" && <div className="workspace-card standalone-card"><div className="version-list">{fileVersions.map((version, index) => <div className="version-row" key={version.id}><span className="version-number">{index === 0 ? "当前" : version.id.replace("sfv_", "v")}</span><div className="version-file"><FileSpreadsheet size={15} /><strong>{version.fileName}</strong></div><span>{version.market}</span><span>{version.wave}</span><span className="version-relation">{version.relation}</span><StatusBadge status={version.status} /><button className="icon-button" title="版本详情"><ArrowUpRight size={15} /></button></div>)}</div></div>}{activeView === "review" && <div className="review-detail-grid"><div className="workspace-card standalone-card"><div className="card-heading"><div><div className="section-kicker">OPEN ISSUES</div><h2>待处理问题</h2></div><span className="status-badge status-warning"><AlertTriangle size={12} />3 个待确认</span></div><div className="issue-list"><IssueRow number="01" title="Sigma 行被重新归类" detail="ban1_%Sig · A77 · 脚注" status="已自动修正" /><IssueRow number="02" title="缺少明确 Base" detail="ban2_%Sig · A80:AB609" status="需确认" warning /><IssueRow number="03" title="CSV 编码置信度较低" detail="tracking.csv · GB18030" status="需确认" warning /></div></div><div className="workspace-card risk-explanation"><div className="section-kicker">PUBLICATION GATE</div><h2>发布暂不可用</h2><p>有 3 个风险项未完成确认。修正会保留源坐标和审计记录。</p><button className="button secondary">查看发布门禁 <ArrowUpRight size={15} /></button></div></div>}{activeView === "explorer" && <div className="workspace-card standalone-card"><div className="table-toolbar"><label className="search-box"><Search size={16} /><input placeholder="搜索 Sheet 或来源类型" /></label><button className="filter-button">全部状态 <ChevronDown size={14} /></button></div><div className="sheet-table" role="table" aria-label="Data Explorer Sheet 列表">{sheets.map((sheet) => <button key={sheet.name} className={`sheet-row ${selectedSheet === sheet.name ? "selected" : ""}`} onClick={() => setSelectedSheet(sheet.name)}><span className="sheet-name"><FileSpreadsheet size={16} /><span><strong>{sheet.name}</strong><small>{sheet.family}</small></span></span><span>{sheet.tables || "—"}</span><span className="mono-cell">{sheet.range}</span><span><StatusBadge status={sheet.status} /></span><ArrowUpRight size={15} /></button>)}</div><div className="table-note"><span><Database size={14} />选中 {selectedSheet} 后可进入表格预览</span><span>Source Lineage 已保留</span></div></div>}{(activeView === "processing" || activeView === "dashboard") && <div className="workspace-card empty-workflow"><div className="empty-icon"><CircleHelp size={23} /></div><h2>{activeView === "processing" ? "等待识别任务" : "Dashboard Draft 尚未启用"}</h2><p>{activeView === "processing" ? "当前页面不会伪造精确进度。接入后台任务后，会在这里显示文件校验、Workbook 扫描、表格识别和验证阶段。" : "完成表格识别、Review 和语义绑定后，才能安全创建可发布的 Dashboard Draft。"}</p><button className="button secondary" onClick={() => setShowUpload(true)}><Upload size={15} />返回上传文件</button></div>}</section>;
 }
 
 function IssueRow({ number, title, detail, status, warning = false }: { number: string; title: string; detail: string; status: string; warning?: boolean }) {
