@@ -30,4 +30,14 @@ deepseek_adapter = ArkStructuredAdapter.from_environment("deepseek")
 doubao_adapter = ArkStructuredAdapter.from_environment("doubao")
 ```
 
-两个配置档均使用同一个 `StructuredGenerationAdapter` 接口。模型返回内容会先由 Pydantic 校验；无效 JSON 最多发起一次修复请求，第二次仍失败就停止并报错。当前阶段尚未读取或发送任何真实文件，必须先用 Golden 评估命令比较两个模型的结果。
+两个配置档均使用同一个 `StructuredGenerationAdapter` 接口。模型返回内容会先由 Pydantic 校验；无效 JSON 最多发起一次修复请求，第二次仍失败就停止并报错。真实文件只可通过受控的 Smoke 或 Golden 评估命令发送，不能直接把完整工作簿交给模型。
+
+## DeepSeek Smoke 两层测试
+
+```bash
+.venv/bin/python -m parser_poc.run_ark_smoke \
+  --profile deepseek \
+  --output outputs/ark_smoke/deepseek_two_layer_results.json
+```
+
+命令只读取单表 Smoke fixture。报告不保留原始单元格值，但会记录 Layer 1 候选数、Layer 2 提议范围、物理校验状态和与 Golden 完整范围的精确匹配结果。

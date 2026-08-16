@@ -38,6 +38,7 @@ class ArkStructuredAdapterTests(unittest.TestCase):
         self.assertEqual(len(requests), 1)
         self.assertEqual(adapter.call_records[-1]["outcome"], "accepted")
         self.assertNotIn("test-secret", repr(adapter.config))
+        self.assertNotIn("ep-test", str(adapter.call_records))
 
     def test_retries_once_after_invalid_json_then_accepts(self):
         adapter, requests = self._adapter([

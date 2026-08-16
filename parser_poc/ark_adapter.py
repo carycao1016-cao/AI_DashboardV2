@@ -209,7 +209,7 @@ class ArkStructuredAdapter:
             except (KeyError, IndexError, ArkResponseError, ValidationError) as exc:
                 last_error = exc
                 self.call_records.append(
-                    {"task_name": task_name, "profile": self.profile, "model": self.config.model, "attempt": attempt, "outcome": "invalid_output"}
+                    {"task_name": task_name, "profile": self.profile, "attempt": attempt, "outcome": "invalid_output"}
                 )
                 if attempt == 2:
                     break
@@ -227,7 +227,7 @@ class ArkStructuredAdapter:
                 )
                 continue
             self.call_records.append(
-                {"task_name": task_name, "profile": self.profile, "model": self.config.model, "attempt": attempt, "outcome": "accepted"}
+                {"task_name": task_name, "profile": self.profile, "attempt": attempt, "outcome": "accepted"}
             )
             return result
         raise ArkResponseError("Ark returned invalid structured output after one repair attempt") from last_error

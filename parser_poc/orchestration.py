@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from openpyxl import load_workbook
 from openpyxl.utils import range_boundaries
 from pydantic import BaseModel
 
@@ -20,7 +22,14 @@ from parser_poc.contracts import (
     ValidationCategory,
     ValidationOutcome,
 )
-from parser_poc.workbook_scan import plan_detail_windows
+from parser_poc.workbook_scan import (
+    DEFAULT_HARD_TOKENS,
+    DEFAULT_TARGET_TOKENS,
+    build_detail_window,
+    plan_detail_windows,
+    scan_workbook,
+    xlsx_sheet_metadata,
+)
 
 
 class ControlledStubAdapter:
@@ -148,6 +157,89 @@ def run_sheet_with_adapter(
         )
         for request in detail_requests
     ]
+    validations = [
+        validate_proposal(proposal, total_rows=total_rows, total_columns=total_columns)
+        for response in detail_responses
+        for proposal in response.proposals
+    ]
+    return outline_responses, detail_responses, validations
+
+
+def run_xlsx_sheet_with_adapter(
+    *,
+    path: Path,
+    sheet_name: str,
+    adapter: StructuredGenerationAdapter,
+    target_tokens: int = DEFAULT_TARGET_TOKENS,
+    hard_tokens: int = DEFAULT_HARD_TOKENS,
+    detail_context_before: int = 20,
+    detail_context_after: int = 20,
+    max_candidate_gap_rows: int = 20,
+) -> tuple[list[SheetOutlineResponse], list[DetailWindowResponse], list[BoundaryValidationResult]]:
+    """对一个 XLSX Sheet 执行真实的两层流程，并由 Python 提供 Detail 样本。
+
+    Layer 1 只接收 WorkbookScanSummary 的 Outline。只有模型返回候选后，Python
+    才按候选窗口重读原始单元格并生成 Detail Window；因此模型不会直接读取整张 Sheet。
+    """
+    summary = scan_workbook(
+        path,
+        target_tokens=target_tokens,
+        hard_tokens=hard_tokens,
+        sheet_name=sheet_name,
+    )
+    sheet_summary = summary["sheets"][0]
+    outline_responses = [
+        adapter.generate_structured(
+            task_name="sheet_outline",
+            payload={"sheet_name": sheet_name, **chunk},
+            output_model=SheetOutlineResponse,
+        )
+        for chunk in sheet_summary["outline_chunks"]
+    ]
+    total_rows = range_boundaries(sheet_summary["scan_range"])[3]
+    total_columns = range_boundaries(sheet_summary["scan_range"])[2]
+    detail_requests = build_detail_requests(
+        sheet_name=sheet_name,
+        total_rows=total_rows,
+        outline_responses=outline_responses,
+        context_before=detail_context_before,
+        context_after=detail_context_after,
+        max_candidate_gap_rows=max_candidate_gap_rows,
+    )
+    if not detail_requests:
+        return outline_responses, [], []
+
+    layout = xlsx_sheet_metadata(path)[sheet_name]
+    value_book = load_workbook(path, read_only=True, data_only=True)
+    formula_book = load_workbook(path, read_only=True, data_only=False)
+    try:
+        value_sheet = value_book[sheet_name]
+        formula_sheet = formula_book[sheet_name]
+        detail_responses = []
+        for request in detail_requests:
+            detail_payload = build_detail_window(
+                value_sheet,
+                formula_sheet,
+                layout,
+                request.model_dump(mode="json")["payload"],
+                target_tokens,
+                hard_tokens,
+            )
+            detail_responses.append(
+                adapter.generate_structured(
+                    task_name="detail_window",
+                    payload={
+                        "sheet_name": sheet_name,
+                        "window_id": request.window_id,
+                        "candidate_ids": request.candidate_ids,
+                        **detail_payload,
+                    },
+                    output_model=DetailWindowResponse,
+                )
+            )
+    finally:
+        value_book.close()
+        formula_book.close()
     validations = [
         validate_proposal(proposal, total_rows=total_rows, total_columns=total_columns)
         for response in detail_responses

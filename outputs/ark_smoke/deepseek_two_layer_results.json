@@ -1,0 +1,30 @@
+{
+  "schema_name": "ark_deepseek_two_layer_smoke",
+  "expected_golden_table_range": "A1:AB78",
+  "outline_candidate_count": 1,
+  "detail_window_count": 1,
+  "proposals": [
+    {
+      "source_range": "A8:AB77",
+      "candidate_id": "table_1",
+      "validation_outcome": "accepted",
+      "validation_categories": [],
+      "exact_range_match": false
+    }
+  ],
+  "call_records": [
+    {
+      "task_name": "sheet_outline",
+      "profile": "deepseek",
+      "attempt": 1,
+      "outcome": "accepted"
+    },
+    {
+      "task_name": "detail_window",
+      "profile": "deepseek",
+      "attempt": 1,
+      "outcome": "accepted"
+    }
+  ],
+  "interpretation": "物理范围校验通过不等于 Golden 完整边界正确；此结果不得自动发布。"
+}

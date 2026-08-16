@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from parser_poc.contracts import (
     CoarseRange,
@@ -10,7 +11,7 @@ from parser_poc.contracts import (
     TableRegions,
     ValidationOutcome,
 )
-from parser_poc.orchestration import ControlledStubAdapter, run_sheet_with_adapter, validate_proposal
+from parser_poc.orchestration import ControlledStubAdapter, run_sheet_with_adapter, run_xlsx_sheet_with_adapter, validate_proposal
 
 
 class OrchestrationTests(unittest.TestCase):
@@ -67,3 +68,42 @@ class OrchestrationTests(unittest.TestCase):
             significance_layout=SignificanceLayout.FOLLOWING_ROW,
         )
         self.assertEqual(regions.significance_layout, SignificanceLayout.FOLLOWING_ROW)
+
+    def test_real_xlsx_runner_sends_detail_samples_only_after_outline_candidate(self):
+        outline = SheetOutlineResponse(
+            sheet_name="ban1_%Sig",
+            chunk_id="ban1_%Sig_chunk_001_rows_1_78",
+            candidates=[CoarseRange(candidate_id="candidate_1", start_row=1, end_row=78, status=OutlineStatus.COMPLETE)],
+        )
+        detail = DetailWindowResponse(
+            sheet_name="ban1_%Sig",
+            window_id="detail_window_001",
+            proposals=[
+                TableBoundaryProposal(
+                    proposal_id="proposal_1",
+                    candidate_id="candidate_1",
+                    sheet_name="ban1_%Sig",
+                    source_range="A1:AB78",
+                    regions=TableRegions(
+                        header_rows=[10, 11],
+                        base_rows=[13],
+                        data_rows=list(range(14, 75)),
+                        footnote_rows=[77, 78],
+                        significance_locations=[15],
+                        significance_layout=SignificanceLayout.FOLLOWING_ROW,
+                    ),
+                )
+            ],
+        )
+        adapter = ControlledStubAdapter([outline, detail])
+        path = Path(__file__).parents[2] / "outputs/ark_smoke/Tabs_%95_first_table.xlsx"
+        outlines, details, validations = run_xlsx_sheet_with_adapter(
+            path=path,
+            sheet_name="ban1_%Sig",
+            adapter=adapter,
+        )
+        self.assertEqual(len(outlines), 1)
+        self.assertEqual(len(details), 1)
+        self.assertEqual(validations[0].outcome, ValidationOutcome.ACCEPTED)
+        self.assertIn("detail_chunks", adapter.calls[1]["payload"])
+        self.assertTrue(adapter.calls[1]["payload"]["detail_chunks"][0]["rows"])
