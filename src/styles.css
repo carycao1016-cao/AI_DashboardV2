@@ -244,6 +244,8 @@ h2 { margin-top: 5px; font-size: 18px; letter-spacing: -.01em; }
 .modal-topline { position: absolute; top: 0; right: 0; left: 0; height: 4px; background: var(--color-ai-accent); border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
 .modal-heading { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 22px; }
 .drop-zone { min-height: 205px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--color-text-secondary); background: #fafafa; border: 1px dashed #c8cdd3; border-radius: var(--radius-sm); text-align: center; }
+.drop-zone.has-file { color: var(--color-success-text); background: var(--color-success-bg); border-color: #9ac3a7; }
+.file-input { display: none; }
 .drop-zone svg { color: #9c7700; }
 .drop-zone strong { color: var(--color-text-primary); font-size: 14px; }
 .drop-zone span { font-size: 11px; }
