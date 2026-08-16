@@ -1,7 +1,16 @@
 import unittest
 
 from parser_poc.contracts import BoundaryValidationResult, CoarseRange, OutlineStatus, SignificanceLayout, ValidationOutcome
-from parser_poc.golden_evaluation import GoldenTableAnnotation, evaluate_golden, outline_covers_annotation, parse_row_spec
+from pathlib import Path
+
+from parser_poc.golden_evaluation import (
+    GoldenTableAnnotation,
+    evaluate_golden,
+    load_golden_bundle,
+    outline_covers_annotation,
+    parse_row_spec,
+    validate_golden_template,
+)
 
 
 class GoldenEvaluationTests(unittest.TestCase):
@@ -39,3 +48,14 @@ class GoldenEvaluationTests(unittest.TestCase):
         self.assertEqual(report["outline_coverage_rate"], 1)
         self.assertEqual(report["validation_outcome_distribution"], {"accepted": 1})
         self.assertNotIn("Question", str(report))
+
+    def test_final_template_has_sheet_negatives_truth_and_inline_cases(self):
+        path = Path(__file__).parents[2] / "outputs/golden_annotation_final/Golden_Annotation_Final.xlsx"
+        if not path.exists():
+            self.skipTest("final Golden workbook is not present")
+        bundle = load_golden_bundle(path)
+        self.assertEqual(len(bundle["tables"]), 27)
+        self.assertEqual(len(bundle["inline_cases"]), 3)
+        self.assertTrue(any(item.expected_outline_status == "not_a_table" for item in bundle["sheets"]))
+        result = validate_golden_template(path)
+        self.assertEqual(result["error_count"], 0, result["errors"])

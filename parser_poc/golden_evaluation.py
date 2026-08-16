@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
+from typing import Any, Iterable, Optional, Sequence
 
 from openpyxl import load_workbook
 from openpyxl.utils import range_boundaries
@@ -69,6 +69,127 @@ class GoldenTableAnnotation(BaseModel):
         if any(row < min_row or row > max_row for row in all_regions):
             raise ValueError("Annotated region rows must be inside table_range")
         return self
+
+
+class GoldenSheetAnnotation(BaseModel):
+    """Sheet-level expectation, including deliberate not_a_table negatives."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    golden_id: str = Field(min_length=1, alias="Golden_ID")
+    source_file: str = Field(min_length=1, alias="Source_File")
+    sheet_name: str = Field(min_length=1, alias="Sheet_Name")
+    sheet_kind: str = Field(min_length=1, alias="Sheet_Kind")
+    expected_outline_status: str = Field(min_length=1, alias="Expected_Outline_Status")
+    expected_physical_table_count: int = Field(ge=0, alias="Expected_Physical_Table_Count")
+    encoding: str = Field(min_length=1, alias="Encoding")
+    encoding_confidence: str = Field(min_length=1, alias="Encoding_Confidence")
+    notes: str = Field("", alias="Notes")
+
+
+class GoldenHeaderAnnotation(BaseModel):
+    """One physical value column and its case-sensitive significance label."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    table_id: str = Field(min_length=1, alias="Table_ID")
+    extracted_header_id: str = Field(min_length=1, alias="Extracted_Header_ID")
+    data_column: str = Field(min_length=1, alias="Data_Column")
+    significance_code: Optional[str] = Field("", alias="Significance_Code")
+    mapping_status: str = Field(min_length=1, alias="Mapping_Status")
+
+
+class GoldenCellTruth(BaseModel):
+    """Source-backed value truth; raw, display and parsed values remain separate."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    table_id: str = Field(min_length=1, alias="Table_ID")
+    sample_type: str = Field(min_length=1, alias="Sample_Type")
+    source_sheet: str = Field(min_length=1, alias="Source_Sheet")
+    source_cell: str = Field(min_length=1, alias="Source_Cell")
+    raw_value: Any = Field(None, alias="Raw_Value")
+    excel_display_value: str = Field("", alias="Excel_Display_Value")
+    parsed_value: Any = Field(None, alias="Parsed_Value")
+    parsed_unit: str = Field("", alias="Parsed_Unit")
+    availability_status: str = Field(min_length=1, alias="Availability_Status")
+    original_significance_marker: Optional[str] = Field("", alias="Original_Significance_Marker")
+    significance_representation: str = Field(min_length=1, alias="Significance_Representation")
+    significance_mapping_status: str = Field(min_length=1, alias="Significance_Mapping_Status")
+
+
+def _sheet_rows(workbook, name: str) -> tuple[list[str], list[tuple[Any, ...]]]:
+    if name not in workbook.sheetnames:
+        raise ValueError("Golden template is missing sheet: %s" % name)
+    iterator = workbook[name].iter_rows(values_only=True)
+    try:
+        raw_headers = next(iterator)
+    except StopIteration as exc:
+        raise ValueError("Golden sheet is empty: %s" % name) from exc
+    headers = [str(value) if value is not None else "" for value in raw_headers]
+    return headers, list(iterator)
+
+
+def _row_dicts(workbook, name: str) -> list[dict[str, Any]]:
+    headers, rows = _sheet_rows(workbook, name)
+    return [
+        {header: row[index] if index < len(row) else None for index, header in enumerate(headers) if header}
+        for row in rows
+        if any(value not in (None, "") for value in row)
+    ]
+
+
+def load_golden_bundle(path: Path) -> dict[str, list[BaseModel] | dict[str, Any]]:
+    """Load the complete final Golden workbook, including truth and negative fixtures."""
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    sheet_rows = _row_dicts(workbook, "Sheet_Annotation")
+    sheets = [GoldenSheetAnnotation.model_validate(row) for row in sheet_rows]
+    annotations = load_golden_annotations(path)
+    header_rows = _row_dicts(workbook, "Header_Annotation")
+    headers = [GoldenHeaderAnnotation.model_validate(row) for row in header_rows]
+    truth_rows = _row_dicts(workbook, "Cell_Truth")
+    truths = [GoldenCellTruth.model_validate(row) for row in truth_rows]
+    parsing_cases = _row_dicts(workbook, "Significance_Parsing_Cases")
+    return {"sheets": sheets, "tables": annotations, "headers": headers, "truths": truths, "inline_cases": parsing_cases}
+
+
+def validate_golden_template(path: Path) -> dict[str, Any]:
+    """Return deterministic structural checks for the final Golden workbook."""
+    bundle = load_golden_bundle(path)
+    sheets = bundle["sheets"]
+    tables = bundle["tables"]
+    headers = bundle["headers"]
+    truths = bundle["truths"]
+    inline_cases = bundle["inline_cases"]
+    table_ids = {item.table_id for item in tables}
+    truth_by_table: Counter[str] = Counter(item.table_id for item in truths)
+    header_by_table: Counter[str] = Counter(item.table_id for item in headers)
+    errors: list[str] = []
+    for sheet in sheets:
+        expected = sheet.expected_physical_table_count
+        actual = sum(1 for table in tables if table.table_id.startswith("%s_" % sheet.golden_id) and table.sheet_name == sheet.sheet_name)
+        if sheet.expected_outline_status == "not_a_table" and actual != 0:
+            errors.append("not_a_table Sheet has physical annotations: %s" % sheet.sheet_name)
+        if sheet.expected_outline_status != "not_a_table" and expected != actual:
+            errors.append("table count mismatch: %s expected=%s actual=%s" % (sheet.sheet_name, expected, actual))
+    for table in tables:
+        if truth_by_table[table.table_id] < 3:
+            errors.append("fewer than three Cell Truth samples: %s" % table.table_id)
+        if table.significance_layout not in {SignificanceLayout.NONE, SignificanceLayout.UNKNOWN} and header_by_table[table.table_id] == 0:
+            errors.append("significance table has no Header mapping: %s" % table.table_id)
+    required_inline = {"20%A", "20ABC", "20%ABC"}
+    actual_inline = {str(row.get("Raw_Value")) for row in inline_cases}
+    errors.extend("missing inline case: %s" % value for value in sorted(required_inline - actual_inline))
+    return {
+        "schema_name": "golden_template_validation_report",
+        "table_count": len(table_ids),
+        "sheet_count": len(sheets),
+        "header_truth_count": len(headers),
+        "cell_truth_count": len(truths),
+        "inline_case_count": len(inline_cases),
+        "error_count": len(errors),
+        "errors": errors,
+    }
 
 
 def _as_boolean(value: object) -> bool:
