@@ -9,8 +9,10 @@ from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.source_versions import router as source_versions_router
-from .infrastructure.db import create_project, get_project, list_projects
+from .infrastructure.db import create_project, get_project, get_project_by_normalized_name, initialize_database, list_projects, normalize_project_name
 from .schemas.projects import CreateProjectRequest
+
+initialize_database()
 
 app = FastAPI(title="AI Dashboard API", version="0.1.0")
 app.add_middleware(
@@ -32,13 +34,14 @@ def create_project_endpoint(request: CreateProjectRequest) -> dict[str, object]:
     import hashlib
     import re
 
-    normalized_name = request.project_name.strip()
-    slug = re.sub(r"[^a-z0-9]+", "-", normalized_name.casefold()).strip("-")[:48]
+    project_name = request.project_name.strip()
+    normalized_name = normalize_project_name(project_name)
+    slug = re.sub(r"[^a-z0-9]+", "-", normalized_name).strip("-")[:48]
     # 中文或其他非拉丁名称不能压缩为同一个固定 ID，保留名称本身并用短哈希保证稳定唯一。
     project_id = "prj_" + slug if slug else "prj_project_" + hashlib.sha256(normalized_name.encode("utf-8")).hexdigest()[:10]
-    if get_project(project_id) is not None:
+    if get_project_by_normalized_name(normalized_name) is not None:
         raise HTTPException(status_code=409, detail="项目名称已存在")
-    return {"success": True, "data": create_project(project_id, normalized_name)}
+    return {"success": True, "data": create_project(project_id, project_name, normalized_name)}
 
 
 @app.get("/api/projects")

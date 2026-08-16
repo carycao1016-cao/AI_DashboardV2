@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -18,62 +19,106 @@ DB_PATH = ROOT / "outputs" / "local_state" / "dashboard.sqlite3"
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH)
+    connection = sqlite3.connect(DB_PATH, timeout=5)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
-    connection.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS projects (
-            project_id TEXT PRIMARY KEY,
-            project_name TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS source_file_versions (
-            source_file_version_id TEXT PRIMARY KEY,
-            project_id TEXT NOT NULL REFERENCES projects(project_id),
-            file_name TEXT NOT NULL,
-            storage_path TEXT NOT NULL,
-            market_scope TEXT NOT NULL,
-            wave_scope TEXT NOT NULL,
-            upload_mode TEXT NOT NULL,
-            replaces_source_file_version_id TEXT,
-            scan_status TEXT NOT NULL,
-            scan_summary_json TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS processing_jobs (
-            job_id TEXT PRIMARY KEY,
-            project_id TEXT NOT NULL REFERENCES projects(project_id),
-            source_file_version_id TEXT NOT NULL REFERENCES source_file_versions(source_file_version_id),
-            job_type TEXT NOT NULL DEFAULT 'ingestion',
-            status TEXT NOT NULL,
-            phase TEXT NOT NULL,
-            progress_percent INTEGER NOT NULL,
-            error_message TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-    )
-    # 兼容上一轮已创建的本地 SQLite 文件；正式环境由迁移工具管理。
-    columns = {row["name"] for row in connection.execute("PRAGMA table_info(processing_jobs)")}
-    if "job_type" not in columns:
-        connection.execute("ALTER TABLE processing_jobs ADD COLUMN job_type TEXT NOT NULL DEFAULT 'ingestion'")
-    if "result_json" not in columns:
-        connection.execute("ALTER TABLE processing_jobs ADD COLUMN result_json TEXT NOT NULL DEFAULT '{}' ")
+    connection.execute("PRAGMA busy_timeout = 5000")
     return connection
+
+
+def initialize_database() -> None:
+    """在服务启动时完成 SQLite schema 初始化和兼容迁移。
+
+    运行时查询不再执行 DDL，避免并发 API 请求争抢 schema 锁。
+    """
+    with connect() as connection:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS projects (
+                project_id TEXT PRIMARY KEY,
+                project_name TEXT NOT NULL,
+                project_name_normalized TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS source_file_versions (
+                source_file_version_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(project_id),
+                file_name TEXT NOT NULL,
+                storage_path TEXT NOT NULL,
+                market_scope TEXT NOT NULL,
+                wave_scope TEXT NOT NULL,
+                upload_mode TEXT NOT NULL,
+                replaces_source_file_version_id TEXT,
+                scan_status TEXT NOT NULL,
+                scan_summary_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS processing_jobs (
+                job_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(project_id),
+                source_file_version_id TEXT NOT NULL REFERENCES source_file_versions(source_file_version_id),
+                job_type TEXT NOT NULL DEFAULT 'ingestion',
+                status TEXT NOT NULL,
+                phase TEXT NOT NULL,
+                progress_percent INTEGER NOT NULL,
+                error_message TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        )
+        # 兼容上一轮已创建的本地 SQLite 文件；正式环境由迁移工具管理。
+        project_columns = {row["name"] for row in connection.execute("PRAGMA table_info(projects)")}
+        if "project_name_normalized" not in project_columns:
+            connection.execute("ALTER TABLE projects ADD COLUMN project_name_normalized TEXT")
+        # 旧数据库可能已经有新增列、但在创建唯一索引前被中断；每次启动都补齐空值和索引。
+        rows_to_normalize = connection.execute(
+            "SELECT project_id, project_name FROM projects WHERE project_name_normalized IS NULL OR project_name_normalized = ''"
+        ).fetchall()
+        for row in rows_to_normalize:
+            connection.execute(
+                "UPDATE projects SET project_name_normalized = ? WHERE project_id = ?",
+                (normalize_project_name(row["project_name"]), row["project_id"]),
+            )
+        try:
+            connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS projects_name_normalized_unique ON projects(project_name_normalized)")
+        except sqlite3.IntegrityError:
+            # 历史本地数据可能已包含同名项目。保留记录，运行时创建校验仍会阻止新的重复名称。
+            pass
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(processing_jobs)")}
+        if "job_type" not in columns:
+            connection.execute("ALTER TABLE processing_jobs ADD COLUMN job_type TEXT NOT NULL DEFAULT 'ingestion'")
+        if "result_json" not in columns:
+            connection.execute("ALTER TABLE processing_jobs ADD COLUMN result_json TEXT NOT NULL DEFAULT '{}' ")
 
 
 def _project(row: sqlite3.Row) -> dict[str, Any]:
     return {"project_id": row["project_id"], "project_name": row["project_name"], "created_at": row["created_at"], "updated_at": row["updated_at"]}
 
 
-def create_project(project_id: str, project_name: str) -> dict[str, Any]:
+def normalize_project_name(project_name: str) -> str:
+    """统一 Unicode、大小写和连续空白，用于同一工作区的项目重名判定。"""
+    return " ".join(unicodedata.normalize("NFKC", project_name).casefold().split())
+
+
+def create_project(project_id: str, project_name: str, project_name_normalized: str) -> dict[str, Any]:
     with connect() as connection:
-        connection.execute("INSERT INTO projects(project_id, project_name) VALUES (?, ?)", (project_id, project_name))
+        connection.execute(
+            "INSERT INTO projects(project_id, project_name, project_name_normalized) VALUES (?, ?, ?)",
+            (project_id, project_name, project_name_normalized),
+        )
         row = connection.execute("SELECT * FROM projects WHERE project_id = ?", (project_id,)).fetchone()
     return _project(row)
+
+
+def get_project_by_normalized_name(project_name_normalized: str) -> dict[str, Any] | None:
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM projects WHERE project_name_normalized = ?",
+            (project_name_normalized,),
+        ).fetchone()
+    return _project(row) if row else None
 
 
 def list_projects() -> list[dict[str, Any]]:
