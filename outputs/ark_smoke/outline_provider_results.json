@@ -1,0 +1,33 @@
+{
+  "schema_name": "ark_smoke_provider_results",
+  "results": [
+    {
+      "profile": "deepseek",
+      "source_file": "Tabs_%95_first_table.xlsx",
+      "outline_chunk_count": 1,
+      "estimated_input_tokens": 1037,
+      "status": "accepted",
+      "chunk_id": "ban1_%Sig_chunk_001_rows_1_78",
+      "candidate_count": 1,
+      "unclassified_count": 2,
+      "calls": 1,
+      "call_outcomes": [
+        "accepted"
+      ]
+    },
+    {
+      "profile": "doubao",
+      "source_file": "Tabs_%95_first_table.xlsx",
+      "outline_chunk_count": 1,
+      "estimated_input_tokens": 1037,
+      "status": "accepted",
+      "chunk_id": "ban1_%Sig_chunk_001_rows_1_78",
+      "candidate_count": 2,
+      "unclassified_count": 2,
+      "calls": 1,
+      "call_outcomes": [
+        "accepted"
+      ]
+    }
+  ]
+}
