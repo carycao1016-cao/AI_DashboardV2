@@ -48,7 +48,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(252, 197, 59
 .language-switcher, .project-switcher { width: 100%; min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; color: #e8e8e4; background: var(--color-primary-soft); border-radius: var(--radius-xs); text-align: left; }
 .language-switcher span { flex: 1; font-size: 12px; }
 .sidebar-label { color: #989894; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; margin: 23px 4px 8px; }
-.project-switcher { min-height: 48px; margin-bottom: 4px; }
+.project-switcher { min-height: 48px; margin-bottom: 4px; cursor: pointer; border: 0; }
+.project-menu { position: absolute; z-index: 8; top: 128px; left: 12px; right: 12px; padding: 5px; background: #292925; border: 1px solid #4a4a44; border-radius: var(--radius-xs); box-shadow: 0 12px 28px rgb(0 0 0 / 24%); }
+.project-menu-item { display: flex; align-items: center; width: 100%; gap: 8px; min-height: 36px; padding: 6px 8px; color: #e8e8e4; background: transparent; border: 0; border-radius: var(--radius-xs); text-align: left; font-size: 11px; cursor: pointer; }
+.project-menu-item:hover, .project-menu-item.selected { background: #3a3a34; }
+.project-menu-item > span:nth-child(2) { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-menu-avatar { display: grid; place-items: center; width: 22px; height: 22px; color: #292925; background: var(--color-ai-accent); border-radius: 50%; font-size: 10px; font-weight: 800; }
+.project-menu-empty { padding: 10px 8px; color: #a6a6a0; font-size: 11px; }
 .new-project-button { width: 100%; min-height: 32px; display: flex; align-items: center; justify-content: center; gap: 6px; margin: 4px 0 2px; color: #c9c9c3; background: transparent; border: 1px dashed #50504b; border-radius: var(--radius-xs); font-size: 11px; }
 .new-project-button:hover { color: var(--color-ai-accent); border-color: #8b711f; background: #2a2a27; }
 .project-switcher > div:nth-child(2), .user-row > div:nth-child(2) { display: flex; flex-direction: column; flex: 1; min-width: 0; }

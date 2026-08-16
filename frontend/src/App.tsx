@@ -65,6 +65,8 @@ type ApiProject = {
   source_file_versions: ApiSourceVersion[];
 };
 
+type ProjectSummary = Pick<ApiProject, "project_id" | "project_name">;
+
 type RecognitionSheet = {
   sheet_name: string;
   outline_response_count: number;
@@ -128,6 +130,8 @@ export function App() {
   const [query, setQuery] = useState("");
   const [showUpload, setShowUpload] = useState(false);
   const [showProjectCreate, setShowProjectCreate] = useState(false);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectName, setProjectName] = useState("Market Pulse");
   const [projectId, setProjectId] = useState("prj_market-pulse");
   const [draftProjectName, setDraftProjectName] = useState("");
@@ -183,9 +187,17 @@ export function App() {
     setRecognitionResult(recognitionPayload.success ? recognitionPayload.data as RecognitionResult : null);
   };
 
+  const loadProjects = async () => {
+    const response = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects`);
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.detail || "读取项目列表失败");
+    setProjects(payload.data as ProjectSummary[]);
+  };
+
   useEffect(() => {
     if (bootstrapStartedRef.current) return;
     bootstrapStartedRef.current = true;
+    void loadProjects().catch((error: Error) => setProjectError(error.message));
     void loadProject("prj_market-pulse").catch(async (error: Error) => {
       if (!error.message.includes("项目不存在")) return;
       try {
@@ -197,6 +209,7 @@ export function App() {
         const payload = await response.json();
         if (!response.ok || !payload.success) throw new Error(payload.detail || "创建默认项目失败");
         applyProject({ ...(payload.data as Omit<ApiProject, "source_file_versions">), source_file_versions: [] });
+        setProjects((current) => [...current, payload.data as ProjectSummary]);
       } catch (createError) {
         setProjectError(createError instanceof Error ? createError.message : "无法连接本地后端");
       }
@@ -216,12 +229,25 @@ export function App() {
       const payload = await response.json();
       if (!response.ok || !payload.success) throw new Error(payload.detail || "创建项目失败");
       applyProject({ ...(payload.data as Omit<ApiProject, "source_file_versions">), source_file_versions: [] });
+      setProjects((current) => [payload.data as ProjectSummary, ...current]);
       setMarketScope("范围未设置");
       setWaveScope("波次未设置");
       setShowProjectCreate(false);
       setDraftProjectName("");
     } catch (error) {
       setProjectError(error instanceof Error ? error.message : "创建项目失败");
+    }
+  };
+
+  const selectProject = async (summary: ProjectSummary) => {
+    setProjectMenuOpen(false);
+    setProjectError("");
+    try {
+      await loadProject(summary.project_id);
+      setMarketScope("范围未设置");
+      setWaveScope("波次未设置");
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : "读取项目失败");
     }
   };
 
@@ -330,7 +356,8 @@ export function App() {
           <Globe2 size={15} /><span>{language} / {language === "中文" ? "English" : "中文"}</span><ChevronDown size={14} />
         </button>
         <div className="sidebar-label">当前项目</div>
-        <div className="project-switcher"><div className="project-avatar">{projectName.slice(0, 1).toUpperCase()}</div><div><strong>{projectName}</strong><span>{marketScope} · {waveScope}</span></div><ChevronDown size={15} /></div>
+        <button className="project-switcher" onClick={() => setProjectMenuOpen((open) => !open)} aria-expanded={projectMenuOpen} aria-haspopup="listbox"><div className="project-avatar">{projectName.slice(0, 1).toUpperCase()}</div><div><strong>{projectName}</strong><span>{marketScope} · {waveScope}</span></div><ChevronDown size={15} /></button>
+        {projectMenuOpen && <div className="project-menu" role="listbox" aria-label="选择项目">{projects.length === 0 && <div className="project-menu-empty">暂无已创建项目</div>}{projects.map((project) => <button key={project.project_id} className={`project-menu-item ${project.project_id === projectId ? "selected" : ""}`} onClick={() => void selectProject(project)} role="option" aria-selected={project.project_id === projectId}><span className="project-menu-avatar">{project.project_name.slice(0, 1).toUpperCase()}</span><span>{project.project_name}</span>{project.project_id === projectId && <Check size={14} />}</button>)}</div>}
         <button className="new-project-button" onClick={() => setShowProjectCreate(true)}><Plus size={15} /><span>新建项目</span></button>
         <nav className="workflow-nav">
           <div className="sidebar-label">工作流</div>

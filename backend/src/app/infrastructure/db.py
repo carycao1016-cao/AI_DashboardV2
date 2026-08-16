@@ -76,6 +76,12 @@ def create_project(project_id: str, project_name: str) -> dict[str, Any]:
     return _project(row)
 
 
+def list_projects() -> list[dict[str, Any]]:
+    with connect() as connection:
+        rows = connection.execute("SELECT * FROM projects ORDER BY updated_at DESC, created_at DESC").fetchall()
+    return [_project(row) for row in rows]
+
+
 def get_project(project_id: str) -> dict[str, Any] | None:
     with connect() as connection:
         row = connection.execute("SELECT * FROM projects WHERE project_id = ?", (project_id,)).fetchone()
@@ -117,6 +123,7 @@ def add_source_file_version(project_id: str, version: dict[str, Any]) -> None:
                 version["replaces_source_file_version_id"], version["scan_status"], json.dumps(version["scan_summary"], ensure_ascii=False),
             ),
         )
+        connection.execute("UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE project_id = ?", (project_id,))
 
 
 def create_processing_job(job_id: str, project_id: str, source_file_version_id: str, job_type: str = "ingestion") -> None:
