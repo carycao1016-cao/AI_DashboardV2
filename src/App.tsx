@@ -25,6 +25,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import { uiConfig } from "./config";
 
 type Status = "已验证" | "需 Review" | "处理中";
 
@@ -67,10 +68,23 @@ function StatusBadge({ status }: { status: Status }) {
 
 export function App() {
   const [selectedSheet, setSelectedSheet] = useState("Percentages_Sig1");
-  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(uiConfig.assistantDefaultOpen);
   const [language, setLanguage] = useState<"中文" | "English">("中文");
   const [query, setQuery] = useState("");
   const [showUpload, setShowUpload] = useState(false);
+  const [showProjectCreate, setShowProjectCreate] = useState(false);
+  const [projectName, setProjectName] = useState("Market Pulse");
+  const [draftProjectName, setDraftProjectName] = useState("");
+  const [draftMarket, setDraftMarket] = useState("US");
+  const [draftWave, setDraftWave] = useState("Wave 1");
+
+  const createProject = () => {
+    const nextName = draftProjectName.trim();
+    if (!nextName) return;
+    setProjectName(nextName);
+    setShowProjectCreate(false);
+    setDraftProjectName("");
+  };
 
   const filteredSheets = useMemo(
     () => sheets.filter((sheet) => `${sheet.name} ${sheet.family}`.toLowerCase().includes(query.toLowerCase())),
@@ -88,7 +102,8 @@ export function App() {
           <Globe2 size={15} /><span>{language} / {language === "中文" ? "English" : "中文"}</span><ChevronDown size={14} />
         </button>
         <div className="sidebar-label">当前项目</div>
-        <div className="project-switcher"><div className="project-avatar">M</div><div><strong>Market Pulse</strong><span>US · Wave 1</span></div><ChevronDown size={15} /></div>
+        <div className="project-switcher"><div className="project-avatar">{projectName.slice(0, 1).toUpperCase()}</div><div><strong>{projectName}</strong><span>{draftMarket} · {draftWave}</span></div><ChevronDown size={15} /></div>
+        <button className="new-project-button" onClick={() => setShowProjectCreate(true)}><Plus size={15} /><span>新建项目</span></button>
         <nav className="workflow-nav">
           <div className="sidebar-label">工作流</div>
           {workflow.map(({ label, icon: Icon, state }) => (
@@ -106,12 +121,12 @@ export function App() {
 
       <main className="workspace">
         <header className="topbar">
-          <div className="breadcrumb"><span>项目</span><span>/</span><strong>Market Pulse</strong></div>
+          <div className="breadcrumb"><span>项目</span><span>/</span><strong>{projectName}</strong></div>
           <div className="topbar-actions"><span className="saved-state"><Check size={14} />已保存</span><button className="icon-button" title="帮助"><CircleHelp size={18} /></button><button className="avatar-button">CC</button></div>
         </header>
         <div className="workspace-scroll">
           <section className="page-header">
-            <div><div className="eyebrow">CREATOR WORKSPACE · MARKET PULSE / US / WAVE 1</div><h1>项目概览</h1><p>查看上传版本、表格识别状态和当前需要处理的结构问题。</p></div>
+            <div><div className="eyebrow">CREATOR WORKSPACE · {projectName.toUpperCase()} / {draftMarket} / {draftWave.toUpperCase()}</div><h1>项目概览</h1><p>查看上传版本、表格识别状态和当前需要处理的结构问题。</p></div>
             <div className="page-actions"><button className="button secondary" onClick={() => setShowUpload(true)}><Upload size={16} />上传新版本</button><button className="button primary"><Sparkles size={16} />开始识别</button></div>
           </section>
 
@@ -149,9 +164,10 @@ export function App() {
       </main>
 
       <button className={`assistant-capsule ${assistantOpen ? "is-open" : ""}`} onClick={() => setAssistantOpen(true)} aria-label="打开 AI 助手"><Sparkles size={16} /><span>AI 助手</span><i /></button>
-      {assistantOpen && <aside className="assistant-drawer" aria-label="AI 助手"><div className="assistant-header"><div><span className="section-kicker">CREATOR AI ASSISTANT</span><h2>解析助手</h2></div><button className="icon-button dark" onClick={() => setAssistantOpen(false)} title="关闭 AI 助手"><X size={18} /></button></div><div className="assistant-body"><div className="assistant-status"><span className="pulse" /><div><strong>当前上下文</strong><span>Market Pulse · {selectedSheet}</span></div></div><div className="message assistant-message"><div className="message-label"><Sparkles size={14} />AI 助手</div><p>我可以解释当前表格的结构、来源位置和显著性映射。任何修改都会先展示预览，不会直接写回源文件。</p><div className="suggestion-list"><button>解释这个表的 Header</button><button>查看显著性来源</button><button>为什么这个 Sheet 需要 Review？</button></div></div><div className="message system-message"><span className="message-label"><ShieldCheck size={14} />解析边界</span><p>当前页面展示的是已通过 Python 回读校验的结果。模型不参与数值生成。</p></div></div><div className="assistant-composer"><label htmlFor="assistant-input">向解析助手提问</label><div className="composer-box"><input id="assistant-input" placeholder="例如：这个 C 标记对应哪个表头？" /><button className="send-button" title="发送"><ArrowUpRight size={17} /></button></div><span>仅限当前项目上下文 · 不会自动修改数据</span></div></aside>}
+      {assistantOpen && <aside className="assistant-drawer" aria-label="AI 助手"><div className="assistant-header"><div><span className="section-kicker">CREATOR AI ASSISTANT</span><h2>解析助手</h2></div><button className="icon-button dark" onClick={() => setAssistantOpen(false)} title="关闭 AI 助手"><X size={18} /></button></div><div className="assistant-body"><div className="assistant-status"><span className="pulse" /><div><strong>当前上下文</strong><span>{projectName} · {selectedSheet}</span></div></div><div className="message assistant-message"><div className="message-label"><Sparkles size={14} />AI 助手</div><p>我可以解释当前表格的结构、来源位置和显著性映射。任何修改都会先展示预览，不会直接写回源文件。</p><div className="suggestion-list"><button>解释这个表的 Header</button><button>查看显著性来源</button><button>为什么这个 Sheet 需要 Review？</button></div></div><div className="message system-message"><span className="message-label"><ShieldCheck size={14} />解析边界</span><p>当前页面展示的是已通过 Python 回读校验的结果。模型不参与数值生成。</p></div></div><div className="assistant-composer"><label htmlFor="assistant-input">向解析助手提问</label><div className="composer-box"><input id="assistant-input" placeholder="例如：这个 C 标记对应哪个表头？" /><button className="send-button" title="发送"><ArrowUpRight size={17} /></button></div><span>仅限当前项目上下文 · 不会自动修改数据</span></div></aside>}
 
       {showUpload && <div className="modal-backdrop" role="presentation"><div className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="upload-title"><div className="modal-topline" /><div className="modal-heading"><div><span className="section-kicker">SOURCE FILE VERSION</span><h2 id="upload-title">上传新版本</h2></div><button className="icon-button" onClick={() => setShowUpload(false)} title="关闭"><X size={18} /></button></div><div className="drop-zone"><Upload size={24} /><strong>拖入 Excel 或 CSV 文件</strong><span>本地演示模式：文件不会上传到服务器</span><button className="button secondary"><FolderOpen size={15} />选择文件</button></div><div className="modal-foot"><span><ShieldCheck size={14} />服务端将负责 MIME、扩展名和工作簿结构校验</span><button className="button primary" onClick={() => setShowUpload(false)}>完成</button></div></div></div>}
+      {showProjectCreate && <div className="modal-backdrop" role="presentation"><div className="project-modal" role="dialog" aria-modal="true" aria-labelledby="project-title"><div className="modal-topline" /><div className="modal-heading"><div><span className="section-kicker">PROJECT SETUP</span><h2 id="project-title">新建项目</h2><p>先建立项目上下文，再上传一个或多个源文件版本。</p></div><button className="icon-button" onClick={() => setShowProjectCreate(false)} title="关闭"><X size={18} /></button></div><div className="form-grid"><label>项目名称<input value={draftProjectName} onChange={(event) => setDraftProjectName(event.target.value)} placeholder="例如：Brand Tracker" autoFocus /></label><label>市场<select value={draftMarket} onChange={(event) => setDraftMarket(event.target.value)}><option>US</option><option>CN</option><option>UK</option><option>Global</option></select></label><label>数据波次<select value={draftWave} onChange={(event) => setDraftWave(event.target.value)}><option>Wave 1</option><option>Wave 2</option><option>Tracking</option></select></label></div><div className="modal-foot"><span><ShieldCheck size={14} />项目创建后仍可在设置中调整上下文</span><div className="modal-actions"><button className="button secondary" onClick={() => setShowProjectCreate(false)}>取消</button><button className="button primary" onClick={createProject} disabled={!draftProjectName.trim()}><Plus size={15} />创建项目</button></div></div></div></div>}
     </div>
   );
 }

@@ -49,6 +49,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(252, 197, 59
 .language-switcher span { flex: 1; font-size: 12px; }
 .sidebar-label { color: #989894; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; margin: 23px 4px 8px; }
 .project-switcher { min-height: 48px; margin-bottom: 4px; }
+.new-project-button { width: 100%; min-height: 32px; display: flex; align-items: center; justify-content: center; gap: 6px; margin: 4px 0 2px; color: #c9c9c3; background: transparent; border: 1px dashed #50504b; border-radius: var(--radius-xs); font-size: 11px; }
+.new-project-button:hover { color: var(--color-ai-accent); border-color: #8b711f; background: #2a2a27; }
 .project-switcher > div:nth-child(2), .user-row > div:nth-child(2) { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .project-switcher strong, .user-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .project-switcher span, .user-row span { color: #a6a6a0; font-size: 11px; margin-top: 3px; }
@@ -202,6 +204,14 @@ h2 { margin-top: 5px; font-size: 18px; letter-spacing: -.01em; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 20px; background: rgba(0, 0, 0, .65); }
 .upload-modal { width: min(560px, 100%); position: relative; padding: 24px; background: var(--color-surface); border-radius: var(--radius-sm); box-shadow: 0 18px 45px rgba(0,0,0,.22); }
+.project-modal { width: min(560px, 100%); position: relative; padding: 24px; background: var(--color-surface); border-radius: var(--radius-sm); box-shadow: 0 18px 45px rgba(0,0,0,.22); }
+.project-modal .modal-heading p { max-width: 390px; margin-top: 6px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
+.form-grid label { display: flex; flex-direction: column; gap: 7px; color: var(--color-text-secondary); font-size: 11px; font-weight: 700; }
+.form-grid label:first-child { grid-column: 1 / -1; }
+.form-grid input, .form-grid select { width: 100%; height: 38px; padding: 0 10px; color: var(--color-text-primary); background: #fafafa; border: 1px solid #cfd3d8; border-radius: var(--radius-sm); outline: 0; font-size: 12px; font-weight: 400; }
+.form-grid input:focus, .form-grid select:focus { border-color: #bb8f00; box-shadow: 0 0 0 3px rgba(252,197,59,.2); }
+.modal-actions { display: flex; gap: 8px; }
 .modal-topline { position: absolute; top: 0; right: 0; left: 0; height: 4px; background: var(--color-ai-accent); border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
 .modal-heading { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 22px; }
 .drop-zone { min-height: 205px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--color-text-secondary); background: #fafafa; border: 1px dashed #c8cdd3; border-radius: var(--radius-sm); text-align: center; }
@@ -224,6 +234,8 @@ h2 { margin-top: 5px; font-size: 18px; letter-spacing: -.01em; }
   .brand-lockup { justify-content: center; padding-bottom: 20px; }
   .brand-lockup > div:last-child, .language-switcher span, .language-switcher svg:last-child, .sidebar-label, .project-switcher > div:nth-child(2), .project-switcher > svg, .nav-item span, .user-row > div:nth-child(2), .user-row > svg, .version { display: none; }
   .language-switcher, .project-switcher, .nav-item { justify-content: center; padding: 0; }
+  .new-project-button { padding: 0; }
+  .new-project-button span { display: none; }
   .project-switcher { min-height: 42px; }
   .workflow-nav .sidebar-label { margin: 18px 0 8px; }
   .nav-item { min-height: 42px; }
@@ -258,4 +270,6 @@ h2 { margin-top: 5px; font-size: 18px; letter-spacing: -.01em; }
   .table-meta { align-items: flex-start; flex-wrap: wrap; }
   .table-meta .meta-spacer, .lineage { display: none !important; }
   .modal-foot { align-items: flex-start; flex-direction: column; }
+  .form-grid { grid-template-columns: 1fr; }
+  .form-grid label:first-child { grid-column: auto; }
 }
