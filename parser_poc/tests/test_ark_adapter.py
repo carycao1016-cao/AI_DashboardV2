@@ -1,7 +1,11 @@
 import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from parser_poc.ark_adapter import ArkConnectionConfig, ArkResponseError, ArkStructuredAdapter
+from parser_poc.ark_adapter import ArkConnectionConfig, ArkResponseError, ArkStructuredAdapter, load_local_ark_environment
 from parser_poc.contracts import SheetOutlineResponse
 
 
@@ -51,6 +55,18 @@ class ArkStructuredAdapterTests(unittest.TestCase):
         ])
         with self.assertRaises(ArkResponseError):
             adapter.generate_structured(task_name="sheet_outline", payload={}, output_model=SheetOutlineResponse)
+
+    def test_local_environment_file_is_loaded_without_overriding_process_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".env.ark"
+            path.write_text(
+                "ARK_API_KEY='local-key'\nARK_DEEPSEEK_MODEL='ep-local'\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(load_local_ark_environment(path)["ARK_DEEPSEEK_MODEL"], "ep-local")
+            with patch.dict(os.environ, {"ARK_DEEPSEEK_MODEL": "ep-process"}, clear=False):
+                config = ArkConnectionConfig.from_environment("deepseek", env_file=path)
+        self.assertEqual(config.model, "ep-process")
 
 
 if __name__ == "__main__":

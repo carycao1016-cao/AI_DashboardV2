@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 outputs/archive/
 outputs/golden_annotation_final/qa/
+parser_poc/.env.ark

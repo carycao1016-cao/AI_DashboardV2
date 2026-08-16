@@ -7,17 +7,19 @@
 
 模型值必须填写方舟控制台中实际创建的推理接入点 ID，例如 `ep-...`；不要把示例模型名写死到 Parser 代码中。
 
-## 环境变量
+## 本机环境文件
+
+本项目已经创建并忽略 `parser_poc/.env.ark`。在该文件中填写实际值即可；它只在本机读取，不会被 Git 跟踪。
 
 ```bash
-export ARK_API_KEY='由方舟控制台创建的 API Key'
-export ARK_DEEPSEEK_MODEL='DeepSeek 的推理接入点 ID'
-export ARK_DOUBAO_MODEL='豆包模型的推理接入点 ID'
-export ARK_BASE_URL='https://ark.cn-beijing.volces.com/api/v3'
-export ARK_TIMEOUT_SECONDS='120'
+ARK_API_KEY='由方舟控制台创建的 API Key'
+ARK_DEEPSEEK_MODEL='DeepSeek 的推理接入点 ID'
+ARK_DOUBAO_MODEL='豆包模型的推理接入点 ID'
+ARK_BASE_URL='https://ark.cn-beijing.volces.com/api/v3'
+ARK_TIMEOUT_SECONDS='120'
 ```
 
-`ARK_API_KEY` 只能放在本机环境变量或部署环境的密钥管理服务中，不能写入 `.env`、代码、测试、Git 提交或 Golden 报告。
+`ARK_API_KEY` 只能放在此被 Git 忽略的本机文件或部署环境的密钥管理服务中，不能写入代码、测试、Git 提交或 Golden 报告。部署环境应使用平台密钥管理，而不是本地文件。
 
 ## 创建适配器
 

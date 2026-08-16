@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Literal
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -32,6 +33,28 @@ class ArkRequestError(RuntimeError):
     """方舟请求未成功完成；错误文本不包含 API Key 或业务载荷。"""
 
 
+def load_local_ark_environment(path: Path) -> dict[str, str]:
+    """读取仅限本机的 Ark 环境文件；不支持变量展开，避免隐式执行 Shell 内容。"""
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, separator, value = line.partition("=")
+        key = key.strip()
+        if not separator or not key.startswith("ARK_"):
+            raise ArkConfigurationError("Invalid Ark environment entry at line %s" % line_number)
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
 @dataclass(frozen=True)
 class ArkConnectionConfig:
     """方舟连接配置。model 必须是控制台创建的推理接入点 ID。"""
@@ -43,21 +66,26 @@ class ArkConnectionConfig:
     temperature: float = 0.0
 
     @classmethod
-    def from_environment(cls, profile: ArkProfile) -> "ArkConnectionConfig":
+    def from_environment(cls, profile: ArkProfile, env_file: Path | None = None) -> "ArkConnectionConfig":
         """从环境变量加载一个模型档案，避免密钥进入仓库或命令行。"""
         if profile not in {"deepseek", "doubao"}:
             raise ArkConfigurationError("Unsupported Ark profile: %s" % profile)
         model_key = "ARK_DEEPSEEK_MODEL" if profile == "deepseek" else "ARK_DOUBAO_MODEL"
-        api_key = os.environ.get("ARK_API_KEY", "").strip()
-        model = os.environ.get(model_key, "").strip()
+        local_values = load_local_ark_environment(env_file or Path(__file__).with_name(".env.ark"))
+
+        def setting(name: str, default: str = "") -> str:
+            return os.environ.get(name, local_values.get(name, default)).strip()
+
+        api_key = setting("ARK_API_KEY")
+        model = setting(model_key)
         if not api_key:
             raise ArkConfigurationError("Missing required environment variable: ARK_API_KEY")
         if not model:
             raise ArkConfigurationError("Missing required environment variable: %s" % model_key)
-        base_url = os.environ.get("ARK_BASE_URL", cls.base_url).strip().rstrip("/")
+        base_url = setting("ARK_BASE_URL", cls.base_url).rstrip("/")
         if not base_url.startswith("https://"):
             raise ArkConfigurationError("ARK_BASE_URL must use https")
-        timeout_text = os.environ.get("ARK_TIMEOUT_SECONDS", "120").strip()
+        timeout_text = setting("ARK_TIMEOUT_SECONDS", "120")
         try:
             timeout_seconds = float(timeout_text)
         except ValueError as exc:
@@ -111,8 +139,8 @@ class ArkStructuredAdapter:
         self.call_records: list[dict[str, Any]] = []
 
     @classmethod
-    def from_environment(cls, profile: ArkProfile) -> "ArkStructuredAdapter":
-        return cls(profile=profile, config=ArkConnectionConfig.from_environment(profile))
+    def from_environment(cls, profile: ArkProfile, env_file: Path | None = None) -> "ArkStructuredAdapter":
+        return cls(profile=profile, config=ArkConnectionConfig.from_environment(profile, env_file))
 
     def _request_completion(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         body = json.dumps(
