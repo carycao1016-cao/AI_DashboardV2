@@ -3,6 +3,7 @@ parser_poc/output/
 __pycache__/
 *.pyc
 outputs/archive/
+outputs/local_uploads/
 outputs/golden_annotation_final/qa/
 parser_poc/.env.ark
 .venv/

@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { uiConfig } from "./config";
 
-type Status = "已验证" | "需 Review" | "处理中";
+type Status = "已验证" | "需 Review" | "处理中" | "已扫描";
 type WorkflowView = "overview" | "versions" | "processing" | "review" | "explorer" | "dashboard";
 
 type TableRow = {
@@ -77,8 +77,8 @@ const workflow = [
 ];
 
 function StatusBadge({ status }: { status: Status }) {
-  const icon = status === "已验证" ? <Check size={12} /> : status === "需 Review" ? <AlertTriangle size={12} /> : <Gauge size={12} />;
-  return <span className={`status-badge status-${status === "已验证" ? "success" : status === "需 Review" ? "warning" : "info"}`}>{icon}{status}</span>;
+  const icon = status === "已验证" || status === "已扫描" ? <Check size={12} /> : status === "需 Review" ? <AlertTriangle size={12} /> : <Gauge size={12} />;
+  return <span className={`status-badge status-${status === "已验证" || status === "已扫描" ? "success" : status === "需 Review" ? "warning" : "info"}`}>{icon}{status}</span>;
 }
 
 export function App() {
@@ -98,6 +98,9 @@ export function App() {
   const [uploadMode, setUploadMode] = useState<"append" | "replace">("append");
   const [replaceVersionId, setReplaceVersionId] = useState("sfv_002");
   const [selectedFileName, setSelectedFileName] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState("");
+  const [uploadSubmitting, setUploadSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileVersions, setFileVersions] = useState<FileVersion[]>(initialFileVersions);
   const [activeView, setActiveView] = useState<WorkflowView>("overview");
@@ -112,31 +115,48 @@ export function App() {
     setDraftProjectName("");
   };
 
-  const completeUpload = () => {
-    if (!selectedFileName) return;
-    const nextNumber = fileVersions.length + 1;
+  const completeUpload = async () => {
+    if (!selectedFile) return;
     const isReplacement = uploadMode === "replace";
-    setMarketScope(uploadMarket === "自动识别（推荐）" ? "待识别" : uploadMarket);
-    setWaveScope(uploadWave === "自动识别（推荐）" ? "待识别" : uploadWave.replace("文件级 ", ""));
-    setFileVersions((current) => [
-      {
-        id: `sfv_${String(nextNumber).padStart(3, "0")}`,
-        fileName: selectedFileName,
-        market: uploadMarket === "自动识别（推荐）" ? (uploadMarketHint.trim() || "待识别") : uploadMarket,
-        wave: uploadWave === "自动识别（推荐）" ? "待识别" : uploadWave.replace("文件级 ", ""),
-        status: "处理中",
-        relation: isReplacement ? `替换 ${replaceVersionId}` : "新增文件",
-      },
-      ...current,
-    ]);
-    setSelectedFileName("");
-    setShowUpload(false);
+    setUploadError("");
+    setUploadSubmitting(true);
+    const market = uploadMarket === "自动识别（推荐）" ? (uploadMarketHint.trim() || "待识别") : uploadMarket;
+    const wave = uploadWave === "自动识别（推荐）" ? "待识别" : uploadWave.replace("文件级 ", "");
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      formData.append("market_scope", market);
+      formData.append("wave_scope", wave);
+      formData.append("upload_mode", uploadMode);
+      if (isReplacement) formData.append("replaces_source_file_version_id", replaceVersionId);
+      const projectId = projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "local-project";
+      const response = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${projectId}/source-versions`, { method: "POST", body: formData });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.detail || "上传或扫描失败");
+      const data = payload.data as { source_file_version_id: string; file_name: string };
+      setMarketScope(market);
+      setWaveScope(wave);
+      setFileVersions((current) => [{ id: data.source_file_version_id, fileName: data.file_name, market, wave, status: "已扫描", relation: isReplacement ? `替换 ${replaceVersionId}` : "新增文件" }, ...current]);
+      setSelectedFile(null);
+      setSelectedFileName("");
+      setShowUpload(false);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "上传或扫描失败");
+    } finally {
+      setUploadSubmitting(false);
+    }
   };
 
   const acceptFile = (file: File | undefined) => {
     if (!file) return;
-    const isSupported = /\.(xlsx|xls|csv)$/i.test(file.name);
-    if (isSupported) setSelectedFileName(file.name);
+    const isSupported = /\.(xlsx|csv)$/i.test(file.name);
+    if (isSupported) {
+      setSelectedFile(file);
+      setSelectedFileName(file.name);
+      setUploadError("");
+    } else {
+      setUploadError("当前 PoC 只支持 XLSX 或 CSV 文件");
+    }
   };
 
   const filteredSheets = useMemo(
@@ -226,7 +246,7 @@ export function App() {
       <button className={`assistant-capsule ${assistantOpen ? "is-open" : ""}`} onClick={() => setAssistantOpen(true)} aria-label="打开 AI 助手"><Sparkles size={16} /><span>AI 助手</span><i /></button>
       {assistantOpen && <aside className="assistant-drawer" aria-label="AI 助手"><div className="assistant-header"><div><span className="section-kicker">CREATOR AI ASSISTANT</span><h2>解析助手</h2></div><button className="icon-button dark" onClick={() => setAssistantOpen(false)} title="关闭 AI 助手"><X size={18} /></button></div><div className="assistant-body"><div className="assistant-status"><span className="pulse" /><div><strong>当前上下文</strong><span>{projectName} · {selectedSheet}</span></div></div><div className="message assistant-message"><div className="message-label"><Sparkles size={14} />AI 助手</div><p>我可以解释当前表格的结构、来源位置和显著性映射。任何修改都会先展示预览，不会直接写回源文件。</p><div className="suggestion-list"><button>解释这个表的 Header</button><button>查看显著性来源</button><button>为什么这个 Sheet 需要 Review？</button></div></div><div className="message system-message"><span className="message-label"><ShieldCheck size={14} />解析边界</span><p>当前页面展示的是已通过 Python 回读校验的结果。模型不参与数值生成。</p></div></div><div className="assistant-composer"><label htmlFor="assistant-input">向解析助手提问</label><div className="composer-box"><input id="assistant-input" placeholder="例如：这个 C 标记对应哪个表头？" /><button className="send-button" title="发送"><ArrowUpRight size={17} /></button></div><span>仅限当前项目上下文 · 不会自动修改数据</span></div></aside>}
 
-      {showUpload && <div className="modal-backdrop" role="presentation"><div className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="upload-title"><div className="modal-topline" /><div className="modal-heading"><div><span className="section-kicker">SOURCE FILE VERSION</span><h2 id="upload-title">{uploadMode === "replace" ? "替换已有版本" : "追加新文件"}</h2><p>{uploadMode === "replace" ? "用于同一市场和 Wave 的修正版；原版本会保留为历史记录。" : "用于新增市场、Wave 或补充文件；现有版本不会被覆盖。"}</p></div><button className="icon-button" onClick={() => setShowUpload(false)} title="关闭"><X size={18} /></button></div><div className={`drop-zone ${selectedFileName ? "has-file" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); acceptFile(event.dataTransfer.files[0]); }}><Upload size={24} /><strong>{selectedFileName || "拖入 Excel 或 CSV 文件"}</strong><span>{selectedFileName ? "文件已选择，完成后会进入待处理状态" : "本地演示模式：文件不会上传到服务器"}</span><input ref={fileInputRef} className="file-input" type="file" accept=".xlsx,.xls,.csv" onChange={(event) => acceptFile(event.target.files?.[0])} /><button className="button secondary" onClick={() => fileInputRef.current?.click()}><FolderOpen size={15} />选择文件</button></div>{uploadMode === "replace" && <label className="replace-select">要替换的历史版本<select value={replaceVersionId} onChange={(event) => setReplaceVersionId(event.target.value)}>{fileVersions.map((version) => <option key={version.id} value={version.id}>{version.id} · {version.fileName}</option>)}</select></label>}<div className="form-grid upload-context-grid"><label>市场来源<select value={uploadMarket} onChange={(event) => setUploadMarket(event.target.value)}><option>自动识别（推荐）</option><option>Global（总体）</option><option>多市场</option><option>已知单一市场</option></select></label><label>Wave 来源<select value={uploadWave} onChange={(event) => setUploadWave(event.target.value)}><option>自动识别（推荐）</option><option>文件信息提供</option><option>表头中识别</option><option>文件级与表级混合</option><option>未知，上传后 Review</option></select></label></div>{uploadMarket === "自动识别（推荐）" && <label className="optional-hint">已知市场提示（可选）<input value={uploadMarketHint} onChange={(event) => setUploadMarketHint(event.target.value)} placeholder="例如 US、APAC；不需要列出全部市场" /></label>}<div className="upload-hint"><BookOpen size={14} /><span>Python 会先读取文件名、Sheet、表头和表内上下文。只有无法确认、互相冲突或按表不一致时，才进入 Review。</span></div><div className="modal-foot"><span><ShieldCheck size={14} />最终市场和 Wave 以源文件证据为准</span><button className="button primary" onClick={completeUpload} disabled={!selectedFileName}>完成</button></div></div></div>}
+      {showUpload && <div className="modal-backdrop" role="presentation"><div className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="upload-title"><div className="modal-topline" /><div className="modal-heading"><div><span className="section-kicker">SOURCE FILE VERSION</span><h2 id="upload-title">{uploadMode === "replace" ? "替换已有版本" : "追加新文件"}</h2><p>{uploadMode === "replace" ? "用于同一市场和 Wave 的修正版；原版本会保留为历史记录。" : "用于新增市场、Wave 或补充文件；现有版本不会被覆盖。"}</p></div><button className="icon-button" onClick={() => setShowUpload(false)} title="关闭"><X size={18} /></button></div><div className={`drop-zone ${selectedFileName ? "has-file" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); acceptFile(event.dataTransfer.files[0]); }}><Upload size={24} /><strong>{selectedFileName || "拖入 XLSX 或 CSV 文件"}</strong><span>{selectedFileName ? "文件已选择，完成后会由 Python 扫描" : "本地 API 会保存文件并进行 Python Workbook 扫描"}</span><input ref={fileInputRef} className="file-input" type="file" accept=".xlsx,.csv" onChange={(event) => acceptFile(event.target.files?.[0])} /><button className="button secondary" onClick={() => fileInputRef.current?.click()}><FolderOpen size={15} />选择文件</button></div>{uploadError && <div className="upload-error"><AlertTriangle size={14} />{uploadError}</div>}{uploadMode === "replace" && <label className="replace-select">要替换的历史版本<select value={replaceVersionId} onChange={(event) => setReplaceVersionId(event.target.value)}>{fileVersions.map((version) => <option key={version.id} value={version.id}>{version.id} · {version.fileName}</option>)}</select></label>}<div className="form-grid upload-context-grid"><label>市场来源<select value={uploadMarket} onChange={(event) => setUploadMarket(event.target.value)}><option>自动识别（推荐）</option><option>Global（总体）</option><option>多市场</option><option>已知单一市场</option></select></label><label>Wave 来源<select value={uploadWave} onChange={(event) => setUploadWave(event.target.value)}><option>自动识别（推荐）</option><option>文件信息提供</option><option>表头中识别</option><option>文件级与表级混合</option><option>未知，上传后 Review</option></select></label></div>{uploadMarket === "自动识别（推荐）" && <label className="optional-hint">已知市场提示（可选）<input value={uploadMarketHint} onChange={(event) => setUploadMarketHint(event.target.value)} placeholder="例如 US、APAC；不需要列出全部市场" /></label>}<div className="upload-hint"><BookOpen size={14} /><span>Python 会先读取文件名、Sheet、表头和表内上下文。只有无法确认、互相冲突或按表不一致时，才进入 Review。</span></div><div className="modal-foot"><span><ShieldCheck size={14} />最终市场和 Wave 以源文件证据为准</span><button className="button primary" onClick={completeUpload} disabled={!selectedFile || uploadSubmitting}>{uploadSubmitting ? "扫描中" : "完成"}</button></div></div></div>}
       {showProjectCreate && <div className="modal-backdrop" role="presentation"><div className="project-modal" role="dialog" aria-modal="true" aria-labelledby="project-title"><div className="modal-topline" /><div className="modal-heading"><div><span className="section-kicker">PROJECT SETUP</span><h2 id="project-title">新建项目</h2><p>项目只保存研究上下文。市场范围和 Wave 可在文件版本或表头中识别。</p></div><button className="icon-button" onClick={() => setShowProjectCreate(false)} title="关闭"><X size={18} /></button></div><div className="form-grid"><label>项目名称<input value={draftProjectName} onChange={(event) => setDraftProjectName(event.target.value)} placeholder="例如：Brand Tracker" autoFocus /></label></div><div className="modal-foot"><span><ShieldCheck size={14} />创建后可上传多个市场和多个 Wave 的文件版本</span><div className="modal-actions"><button className="button secondary" onClick={() => setShowProjectCreate(false)}>取消</button><button className="button primary" onClick={createProject} disabled={!draftProjectName.trim()}><Plus size={15} />创建项目</button></div></div></div></div>}
     </div>
   );
