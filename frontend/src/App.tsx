@@ -83,6 +83,29 @@ type RecognitionResult = {
   result: { sheets?: RecognitionSheet[]; provider?: string; max_sheets?: number };
 };
 
+type ExtractedCell = {
+  extracted_header_id: string;
+  source_cell: string;
+  raw_value: unknown;
+  excel_display_value: string;
+  parsed_value: unknown;
+  parsed_unit: string;
+  original_significance_marker: string;
+  significance_mapping_status: string;
+};
+
+type ExtractedTable = {
+  extracted_table_id: string;
+  source_sheet: string;
+  source_range: string;
+  detected_question_number: string;
+  detected_question_text: string;
+  detected_table_title: string;
+  table_variant: string;
+  headers: Array<{ extracted_header_id: string; display_label: string; header_path: string[]; significance_code: string }>;
+  rows: Array<{ extracted_row_id: string; original_label: string; detected_row_type: string; cells: ExtractedCell[] }>;
+};
+
 type ProcessingJob = {
   job_id: string;
   source_file_version_id: string;
@@ -153,6 +176,7 @@ export function App() {
   const [fileVersions, setFileVersions] = useState<FileVersion[]>(initialFileVersions);
   const [processingJob, setProcessingJob] = useState<ProcessingJob | null>(null);
   const [recognitionResult, setRecognitionResult] = useState<RecognitionResult | null>(null);
+  const [extractionTables, setExtractionTables] = useState<ExtractedTable[]>([]);
   const [activeView, setActiveView] = useState<WorkflowView>("overview");
 
   const applyProject = (project: ApiProject) => {
@@ -177,6 +201,7 @@ export function App() {
     const completedVersion = project.source_file_versions.find((version) => version.scan_status === "completed");
     if (!completedVersion) {
       setRecognitionResult(null);
+      setExtractionTables([]);
       return;
     }
     const recognitionResponse = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/source-versions/${completedVersion.source_file_version_id}/recognition-results`);
@@ -186,6 +211,13 @@ export function App() {
     }
     const recognitionPayload = await recognitionResponse.json();
     setRecognitionResult(recognitionPayload.success ? recognitionPayload.data as RecognitionResult : null);
+    const extractionResponse = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/source-versions/${completedVersion.source_file_version_id}/extraction`);
+    if (!extractionResponse.ok) {
+      setExtractionTables([]);
+      return;
+    }
+    const extractionPayload = await extractionResponse.json();
+    setExtractionTables(extractionPayload.success ? (extractionPayload.data.tables as ExtractedTable[]) : []);
   };
 
   const loadProjects = async () => {
@@ -409,7 +441,7 @@ export function App() {
               <div className="card-heading"><div><div className="section-kicker">SOURCE INVENTORY</div><h2>Sheet 与物理表</h2><p>按 Sheet 保存源位置；空 Sheet 或 Index 不会被强行识别为表。</p></div><button className="icon-button" title="更多筛选"><Filter size={17} /></button></div>
               <div className="table-toolbar"><label className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 Sheet 或来源类型" /></label><button className="filter-button">全部状态 <ChevronDown size={14} /></button></div>
               <div className="sheet-table" role="table" aria-label="Sheet 列表"><div className="sheet-row sheet-head" role="row"><span>Sheet / 类型</span><span>物理表</span><span>范围</span><span>状态</span><span /></div>{filteredSheets.map((sheet) => <button key={sheet.name} className={`sheet-row ${selectedSheet === sheet.name ? "selected" : ""}`} onClick={() => setSelectedSheet(sheet.name)}><span className="sheet-name"><FileSpreadsheet size={16} /><span><strong>{sheet.name}</strong><small>{sheet.family}</small></span></span><span>{sheet.tables || "—"}</span><span className="mono-cell">{sheet.range}</span><span><StatusBadge status={sheet.status} /></span><ArrowUpRight size={15} /></button>)}</div>
-              <div className="card-footer"><span>共 4 个 Sheet · 9 张物理表已载入演示数据</span><button className="text-button">查看全部 <ArrowUpRight size={14} /></button></div>
+              <div className="card-footer"><span>共 {filteredSheets.length} 个 Sheet · {filteredSheets.reduce((total, sheet) => total + (sheet.tables || 0), 0)} 张已识别物理表</span><button className="text-button">查看全部 <ArrowUpRight size={14} /></button></div>
             </div>
 
             <div className="workspace-card review-card">
@@ -421,9 +453,7 @@ export function App() {
 
           <section className="workspace-card explorer-card">
             <div className="card-heading"><div><div className="section-kicker">DATA EXPLORER · {selectedSheet.toUpperCase()}</div><h2>已验证表格预览</h2><p>展示值来自 Excel display value；解析值保留原始精度和 Source Lineage。</p></div><div className="preview-actions"><button className="button secondary"><BookOpen size={15} />原始来源</button><button className="button secondary"><PanelRight size={15} />识别详情</button></div></div>
-            <div className="table-meta"><span className="table-title-mark" /><div><strong>S1：请问您的性别是？</strong><span>Percentages_Sig1 · A12:AW18 · percentage</span></div><StatusBadge status="已验证" /><span className="meta-spacer" /><span className="lineage"><Database size={14} /> 来源坐标已保留</span></div>
-            <div className="data-preview" role="table" aria-label="表格预览"><div className="data-row data-head"><span>选项</span><span>Total (A)</span><span>Male (B)</span><span>Female (C)</span><span>来源</span></div>{tableRows.map((row) => <div className="data-row" key={row.label}><strong>{row.label}</strong><span>{row.total}</span><span>{row.male} {row.maleSig && <em className="sig-marker">{row.maleSig}</em>}</span><span>{row.female} {row.femaleSig && <em className="sig-marker">{row.femaleSig}</em>}</span><span className="mono-cell source-cell">{row.source}</span></div>)}</div>
-            <div className="table-note"><span><ShieldCheck size={14} />Python 已从源文件回读；AI 只提供结构建议</span><span><span className="legend-dot" />`-`、0 和不可用值保持区分</span></div>
+            {extractionTables.find((table) => table.source_sheet === selectedSheet) ? <ExtractedTablePreview table={extractionTables.find((item) => item.source_sheet === selectedSheet)!} /> : projectId === "prj_market-pulse" ? <><div className="table-meta"><span className="table-title-mark" /><div><strong>S1：请问您的性别是？</strong><span>Percentages_Sig1 · A12:AW18 · percentage</span></div><StatusBadge status="已验证" /><span className="meta-spacer" /><span className="lineage"><Database size={14} /> 来源坐标已保留</span></div><div className="data-preview" role="table" aria-label="表格预览"><div className="data-row data-head"><span>选项</span><span>Total (A)</span><span>Male (B)</span><span>Female (C)</span><span>来源</span></div>{tableRows.map((row) => <div className="data-row" key={row.label}><strong>{row.label}</strong><span>{row.total}</span><span>{row.male} {row.maleSig && <em className="sig-marker">{row.maleSig}</em>}</span><span>{row.female} {row.femaleSig && <em className="sig-marker">{row.femaleSig}</em>}</span><span className="mono-cell source-cell">{row.source}</span></div>)}</div><div className="table-note"><span><ShieldCheck size={14} />Python 已从源文件回读；AI 只提供结构建议</span><span><span className="legend-dot" />`-`、0 和不可用值保持区分</span></div></> : <div className="empty-workflow"><div className="empty-icon"><Database size={23} /></div><h2>当前 Sheet 尚无可展示的提取数据</h2><p>Python 已保存扫描和识别状态；通过边界校验后，真实 raw/display/parsed 数据会显示在这里。</p></div>}
           </section>
           </> : <WorkflowPanel activeView={activeView} fileVersions={fileVersions} processingJob={processingJob} recognitionResult={recognitionResult} setShowUpload={setShowUpload} selectedSheet={selectedSheet} setSelectedSheet={setSelectedSheet} />}
         </div>
@@ -440,6 +470,15 @@ export function App() {
 
 function SummaryCard({ label, value, meta, icon, tone }: { label: string; value: string; meta: string; icon: React.ReactNode; tone: string }) {
   return <div className={`summary-card tone-${tone}`}><div className="summary-icon">{icon}</div><span>{label}</span><strong>{value}</strong><small>{meta}</small></div>;
+}
+
+function ExtractedTablePreview({ table }: { table: ExtractedTable }) {
+  const headers = table.headers ?? [];
+  return <>
+    <div className="table-meta"><span className="table-title-mark" /><div><strong>{table.detected_question_number || table.detected_table_title || "已提取表格"}</strong><span>{table.source_sheet} · {table.source_range} · {table.table_variant || "unknown"}</span></div><StatusBadge status="已验证" /><span className="meta-spacer" /><span className="lineage"><Database size={14} /> Python 回读 · Source Lineage</span></div>
+    <div className="data-preview" role="table" aria-label="Python 提取表格预览"><div className="data-row data-head"><span>选项</span>{headers.map((header) => <span key={header.extracted_header_id}>{header.display_label || header.header_path.join(" / ") || "未命名"}{header.significance_code && <em className="sig-marker">{header.significance_code}</em>}</span>)}<span>来源</span></div>{table.rows.map((row) => <div className="data-row" key={row.extracted_row_id}><strong>{row.original_label || row.detected_row_type}</strong>{headers.map((header) => { const cell = row.cells.find((item) => item.extracted_header_id === header.extracted_header_id); return <span key={header.extracted_header_id}>{cell?.excel_display_value ?? "-"}{cell?.original_significance_marker && <em className="sig-marker">{cell.original_significance_marker}</em>}</span>; })}<span className="mono-cell source-cell">{row.cells[0]?.source_cell || "-"}</span></div>)}</div>
+    <div className="table-note"><span><ShieldCheck size={14} />真实提取结果；原始值、显示值和解析值均保留</span><span><span className="legend-dot" />`-`、0 和不可用值保持区分</span></div>
+  </>;
 }
 
 function WorkflowPanel({ activeView, fileVersions, processingJob, recognitionResult, setShowUpload, selectedSheet, setSelectedSheet }: { activeView: Exclude<WorkflowView, "overview">; fileVersions: FileVersion[]; processingJob: ProcessingJob | null; recognitionResult: RecognitionResult | null; setShowUpload: (open: boolean) => void; selectedSheet: string; setSelectedSheet: (sheet: string) => void }) {

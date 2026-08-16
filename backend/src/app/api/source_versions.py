@@ -139,3 +139,27 @@ def get_recognition_results(project_id: str, source_file_version_id: str) -> dic
             "result": job["result"],
         },
     }
+
+
+@router.get("/{project_id}/source-versions/{source_file_version_id}/extraction")
+def get_extraction(project_id: str, source_file_version_id: str) -> dict[str, object]:
+    """读取最近一次识别任务中由 Python 回读生成的提取表数据。"""
+    job = get_latest_processing_job(project_id, source_file_version_id, "recognition")
+    if job is None:
+        raise HTTPException(status_code=404, detail="尚无 AI 识别结果")
+    result = job.get("result") or {}
+    sheets = result.get("sheets") if isinstance(result, dict) else None
+    extracted_tables = [
+        table
+        for sheet in (sheets if isinstance(sheets, list) else [])
+        for table in (sheet.get("extracted_tables", []) if isinstance(sheet, dict) else [])
+    ]
+    return {
+        "success": True,
+        "data": {
+            "job_id": job["job_id"],
+            "source_file_version_id": source_file_version_id,
+            "status": job["status"],
+            "tables": extracted_tables,
+        },
+    }

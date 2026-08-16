@@ -7,6 +7,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from parser_poc.ark_adapter import ArkStructuredAdapter
+from parser_poc.extraction import extract_validated_table
 from parser_poc.orchestration import run_xlsx_sheet_with_adapter
 
 from ..infrastructure.db import update_processing_job
@@ -30,6 +31,23 @@ def run_ai_recognition(job_id: str, source_path: str) -> None:
             outlines, details, validations = run_xlsx_sheet_with_adapter(
                 path=Path(source_path), sheet_name=sheet_name, adapter=adapter,
             )
+            extracted_tables = []
+            validation_index = 0
+            for detail_response in details:
+                for proposal in detail_response.proposals:
+                    validation = validations[validation_index]
+                    validation_index += 1
+                    if validation.outcome.value not in {"accepted", "adjusted"}:
+                        continue
+                    extracted_tables.append(
+                        extract_validated_table(
+                            path=Path(source_path),
+                            proposal=proposal,
+                            validation=validation,
+                            extracted_table_id=f"{job_id}_{index}_{len(extracted_tables) + 1}",
+                            metric_type="unknown",
+                        )
+                    )
             results.append({
                 "sheet_name": sheet_name,
                 "outline_response_count": len(outlines),
@@ -45,6 +63,8 @@ def run_ai_recognition(job_id: str, source_path: str) -> None:
                     outcome.value: sum(1 for item in validations if item.outcome == outcome)
                     for outcome in {item.outcome for item in validations}
                 },
+                # 只有 Python 对源文件回读并通过边界校验后，才生成提取数据。
+                "extracted_tables": extracted_tables,
             })
         update_processing_job(job_id, status="completed", phase="AI 两层识别完成", progress_percent=100, result={"sheets": results, "provider": AI_PROFILE, "max_sheets": AI_MAX_SHEETS})
     except Exception as exc:
