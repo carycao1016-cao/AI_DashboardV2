@@ -190,8 +190,24 @@ class ArkStructuredAdapter:
             "你是结构化数据接口。只返回一个 JSON 对象，不要返回 Markdown、解释或额外字段。"
             "输出必须符合用户提供的 JSON Schema；不得猜测未提供的源数据。"
         )
+        if task_name == "detail_window":
+            system_message += (
+                " source_range 必须是完整的物理表范围，而不是只包含数值的数据区。"
+                "只要 Detail Window 中可见，source_range 必须覆盖标题、完整表头、Base、数据和脚注；"
+                "regions 中的行必须使用源文件绝对行号。不要为了缩短范围而删除表前或表后的结构行；"
+                "如果上下边界不确定，应保守包含可见的相邻结构行，并让 Python 后续校验。"
+            )
         user_message = json.dumps(
-            {"task_name": task_name, "input": payload, "output_json_schema": schema},
+            {
+                "task_name": task_name,
+                "input": payload,
+                "output_json_schema": schema,
+                "boundary_contract": (
+                    "full_physical_table_range_including_title_header_base_data_footnote"
+                    if task_name == "detail_window"
+                    else "coarse_candidate_only"
+                ),
+            },
             ensure_ascii=False,
             separators=(",", ":"),
         )

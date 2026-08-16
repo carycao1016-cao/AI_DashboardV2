@@ -50,6 +50,29 @@ class ArkStructuredAdapterTests(unittest.TestCase):
         self.assertEqual(len(requests), 2)
         self.assertEqual([record["outcome"] for record in adapter.call_records], ["invalid_output", "accepted"])
 
+    def test_detail_prompt_requires_full_physical_table_range(self):
+        responses = [{"choices": [{"message": {"content": '{"sheet_name":"Sheet1","window_id":"w1","proposals":[]}'}}]}]
+        requests = []
+
+        def transport(request, _timeout):
+            requests.append(json.loads(request.data.decode("utf-8")))
+            return json.dumps(responses.pop(0)).encode("utf-8")
+
+        adapter = ArkStructuredAdapter(
+            profile="deepseek",
+            config=ArkConnectionConfig(api_key="test-secret", model="ep-test"),
+            transport=transport,
+        )
+        from parser_poc.contracts import DetailWindowResponse
+
+        adapter.generate_structured(task_name="detail_window", payload={"detail_chunks": []}, output_model=DetailWindowResponse)
+        message = requests[0]["messages"][0]["content"]
+        self.assertIn("完整的物理表范围", message)
+        self.assertEqual(
+            requests[0]["messages"][1]["content"].find("full_physical_table_range_including_title_header_base_data_footnote") >= 0,
+            True,
+        )
+
     def test_fails_after_one_invalid_output_repair(self):
         adapter, _requests = self._adapter([
             {"choices": [{"message": {"content": "not json"}}]},
