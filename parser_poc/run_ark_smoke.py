@@ -55,6 +55,7 @@ def main() -> None:
                     "candidate_id": proposal.candidate_id,
                     "validation_outcome": validation.outcome.value,
                     "validation_categories": [category.value for category in validation.categories],
+                    "boundary_corrections": validation.corrections,
                     "exact_range_match": proposal.source_range == args.expected_range,
                 }
             )

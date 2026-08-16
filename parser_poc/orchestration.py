@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from openpyxl import load_workbook
-from openpyxl.utils import range_boundaries
+from openpyxl.utils import get_column_letter, range_boundaries
 from pydantic import BaseModel
 
 from parser_poc.contracts import (
@@ -75,6 +75,78 @@ def validate_proposal(proposal: TableBoundaryProposal, *, total_rows: int, total
         outcome=ValidationOutcome.REVIEW_REQUIRED if categories else ValidationOutcome.ACCEPTED,
         categories=categories,
     )
+
+
+def normalize_edge_rows(proposal: TableBoundaryProposal, value_sheet: Any) -> tuple[TableBoundaryProposal, list[str]]:
+    """移除明确的分页/空白边缘行，并保留可审计的修正说明。
+
+    AI 可能会把候选窗口边缘的 ``#page`` 或空白行纳入 source_range。
+    这些行不能作为表内容，但表内的空白行不能据此删除，因为 Quantum
+    的显著性标记可能位于数据行之后。故这里只检查范围最外侧，并且只
+    在该行没有被 proposal 的任何结构区域声明时修正。
+    """
+    min_col, min_row, max_col, max_row = range_boundaries(proposal.source_range)
+    declared_rows = {
+        *proposal.regions.title_rows,
+        *proposal.regions.header_rows,
+        *proposal.regions.base_rows,
+        *proposal.regions.data_rows,
+        *proposal.regions.footnote_rows,
+        *proposal.regions.significance_locations,
+    }
+
+    def edge_kind(row_number: int) -> str:
+        values = [value_sheet.cell(row_number, column).value for column in range(min_col, max_col + 1)]
+        non_empty = [str(value).strip() for value in values if value not in (None, "") and str(value).strip()]
+        if not non_empty:
+            return "blank"
+        if non_empty[0] == "#page":
+            return "page_marker"
+        return "content"
+
+    new_min, new_max = min_row, max_row
+    corrections: list[str] = []
+    while new_min <= new_max and new_min not in declared_rows and edge_kind(new_min) in {"blank", "page_marker"}:
+        corrections.append("trimmed_top_%s_row_%s" % (edge_kind(new_min), new_min))
+        new_min += 1
+    while new_max >= new_min and new_max not in declared_rows and edge_kind(new_max) in {"blank", "page_marker"}:
+        corrections.append("trimmed_bottom_%s_row_%s" % (edge_kind(new_max), new_max))
+        new_max -= 1
+    if not corrections:
+        return proposal, corrections
+    adjusted = proposal.model_copy(
+        update={
+            "source_range": "%s%s:%s%s"
+            % (get_column_letter(min_col), new_min, get_column_letter(max_col), new_max)
+        }
+    )
+    return adjusted, corrections
+
+
+def normalize_known_summary_rows(proposal: TableBoundaryProposal, value_sheet: Any) -> tuple[TableBoundaryProposal, list[str]]:
+    """把有明确源标签的 Sigma 汇总行从数据区归入脚注区。
+
+    该规则有意保持很窄：只接受首列标签精确为 ``Sigma`` 的行，避免把
+    普通选项文本或未知表格样式错误重分类。它解决的是模型在 Quantum
+    物理范围正确时，仍把 Tab 软件的汇总统计行误列为业务数据的问题。
+    """
+    min_col, _min_row, _max_col, _max_row = range_boundaries(proposal.source_range)
+    summary_rows = []
+    for row_number in proposal.regions.data_rows:
+        label = value_sheet.cell(row_number, min_col).value
+        normalized_label = str(label).strip().casefold() if label not in (None, "") else ""
+        if normalized_label == "sigma":
+            summary_rows.append(row_number)
+    if not summary_rows:
+        return proposal, []
+    regions = proposal.regions.model_copy(
+        update={
+            "data_rows": [row for row in proposal.regions.data_rows if row not in summary_rows],
+            "footnote_rows": sorted({*proposal.regions.footnote_rows, *summary_rows}),
+        }
+    )
+    normalized = proposal.model_copy(update={"regions": regions})
+    return normalized, ["reclassified_sigma_row_%s_as_footnote" % row for row in summary_rows]
 
 
 def _candidate_ranges(responses: Sequence[SheetOutlineResponse]) -> list[tuple[str, int, int]]:
@@ -237,6 +309,19 @@ def run_xlsx_sheet_with_adapter(
                     output_model=DetailWindowResponse,
                 )
             )
+        normalized_responses: list[DetailWindowResponse] = []
+        normalization_notes: dict[str, list[str]] = {}
+        for response in detail_responses:
+            normalized_proposals = []
+            for proposal in response.proposals:
+                normalized, corrections = normalize_edge_rows(proposal, value_sheet)
+                normalized, summary_corrections = normalize_known_summary_rows(normalized, value_sheet)
+                corrections.extend(summary_corrections)
+                normalized_proposals.append(normalized)
+                if corrections:
+                    normalization_notes[normalized.proposal_id] = corrections
+            normalized_responses.append(response.model_copy(update={"proposals": normalized_proposals}))
+        detail_responses = normalized_responses
     finally:
         value_book.close()
         formula_book.close()
@@ -245,4 +330,9 @@ def run_xlsx_sheet_with_adapter(
         for response in detail_responses
         for proposal in response.proposals
     ]
+    for validation in validations:
+        notes = normalization_notes.get(validation.proposal_id, [])
+        if notes:
+            validation.outcome = ValidationOutcome.ADJUSTED
+            validation.corrections.extend(notes)
     return outline_responses, detail_responses, validations
