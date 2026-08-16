@@ -1,0 +1,209 @@
+{
+  "schema_name": "golden_full_scan_evaluation_report",
+  "schema_version": "0.1.0-poc",
+  "golden_template_validation": {
+    "schema_name": "golden_template_validation_report",
+    "table_count": 27,
+    "sheet_count": 11,
+    "header_truth_count": 888,
+    "cell_truth_count": 81,
+    "inline_case_count": 3,
+    "error_count": 0,
+    "errors": []
+  },
+  "source_count": 5,
+  "total_table_count": 27,
+  "outline_covered_table_count": 27,
+  "outline_missed_table_count": 0,
+  "outline_coverage_rate": 1.0,
+  "layer_status_distribution": {
+    "covered": 27,
+    "missed": 0
+  },
+  "total_outline_chunk_count": 71,
+  "total_outline_estimated_input_tokens": 4144369,
+  "sources": {
+    "D01": {
+      "source_file": "Tabs_ISE17933_HK_0807.xlsx",
+      "source_format": "xlsx",
+      "sheet_count": 7,
+      "sheet_scan_stats": [
+        {
+          "sheet_name": "Index",
+          "outline_chunk_count": 1,
+          "outline_estimated_input_tokens": 9942
+        },
+        {
+          "sheet_name": "Summary",
+          "outline_chunk_count": 1,
+          "outline_estimated_input_tokens": 866
+        },
+        {
+          "sheet_name": "Percentages",
+          "outline_chunk_count": 17,
+          "outline_estimated_input_tokens": 1056643
+        },
+        {
+          "sheet_name": "Counts",
+          "outline_chunk_count": 17,
+          "outline_estimated_input_tokens": 1053708
+        },
+        {
+          "sheet_name": "Percentages_Sig1",
+          "outline_chunk_count": 10,
+          "outline_estimated_input_tokens": 580686
+        },
+        {
+          "sheet_name": "Percentages_Sig2",
+          "outline_chunk_count": 10,
+          "outline_estimated_input_tokens": 627827
+        },
+        {
+          "sheet_name": "Percentages_Sig3",
+          "outline_chunk_count": 4,
+          "outline_estimated_input_tokens": 232033
+        }
+      ],
+      "golden_report": {
+        "schema_name": "golden_table_recognition_report",
+        "schema_version": "0.1.0-poc",
+        "table_count": 15,
+        "outline_covered_table_count": 15,
+        "outline_missed_table_count": 0,
+        "outline_coverage_rate": 1.0,
+        "validation_outcome_distribution": {},
+        "breakdowns": {
+          "source_family=Decipher|sheet=Counts|header_depth=2|significance_layout=none": {
+            "outline_covered": 3,
+            "total": 3
+          },
+          "source_family=Decipher|sheet=Percentages_Sig1|header_depth=2|significance_layout=adjacent_column": {
+            "outline_covered": 3,
+            "total": 3
+          },
+          "source_family=Decipher|sheet=Percentages_Sig2|header_depth=2|significance_layout=adjacent_column": {
+            "outline_covered": 3,
+            "total": 3
+          },
+          "source_family=Decipher|sheet=Percentages_Sig3|header_depth=2|significance_layout=adjacent_column": {
+            "outline_covered": 3,
+            "total": 3
+          },
+          "source_family=Decipher|sheet=Percentages|header_depth=2|significance_layout=none": {
+            "outline_covered": 3,
+            "total": 3
+          }
+        }
+      }
+    },
+    "Q01": {
+      "source_file": "AUS_W1.xlsx",
+      "source_format": "xlsx",
+      "sheet_count": 1,
+      "sheet_scan_stats": [
+        {
+          "sheet_name": "Sheet1",
+          "outline_chunk_count": 3,
+          "outline_estimated_input_tokens": 157435
+        }
+      ],
+      "golden_report": {
+        "schema_name": "golden_table_recognition_report",
+        "schema_version": "0.1.0-poc",
+        "table_count": 3,
+        "outline_covered_table_count": 3,
+        "outline_missed_table_count": 0,
+        "outline_coverage_rate": 1.0,
+        "validation_outcome_distribution": {},
+        "breakdowns": {
+          "source_family=Quantum|sheet=Sheet1|header_depth=2|significance_layout=none": {
+            "outline_covered": 3,
+            "total": 3
+          }
+        }
+      }
+    },
+    "Q02": {
+      "source_file": "Tabs_N+%.xlsx",
+      "source_format": "xlsx",
+      "sheet_count": 1,
+      "sheet_scan_stats": [
+        {
+          "sheet_name": "ban1%N",
+          "outline_chunk_count": 1,
+          "outline_estimated_input_tokens": 41562
+        }
+      ],
+      "golden_report": {
+        "schema_name": "golden_table_recognition_report",
+        "schema_version": "0.1.0-poc",
+        "table_count": 3,
+        "outline_covered_table_count": 3,
+        "outline_missed_table_count": 0,
+        "outline_coverage_rate": 1.0,
+        "validation_outcome_distribution": {},
+        "breakdowns": {
+          "source_family=Quantum|sheet=ban1%N|header_depth=2|significance_layout=none": {
+            "outline_covered": 3,
+            "total": 3
+          }
+        }
+      }
+    },
+    "Q03": {
+      "source_file": "Tabs_%95.xlsx",
+      "source_format": "xlsx",
+      "sheet_count": 1,
+      "sheet_scan_stats": [
+        {
+          "sheet_name": "ban1_%Sig",
+          "outline_chunk_count": 4,
+          "outline_estimated_input_tokens": 192340
+        }
+      ],
+      "golden_report": {
+        "schema_name": "golden_table_recognition_report",
+        "schema_version": "0.1.0-poc",
+        "table_count": 3,
+        "outline_covered_table_count": 3,
+        "outline_missed_table_count": 0,
+        "outline_coverage_rate": 1.0,
+        "validation_outcome_distribution": {},
+        "breakdowns": {
+          "source_family=Quantum|sheet=ban1_%Sig|header_depth=2|significance_layout=following_row": {
+            "outline_covered": 3,
+            "total": 3
+          }
+        }
+      }
+    },
+    "Q04": {
+      "source_file": "ban1_%Sig.csv",
+      "source_format": "csv",
+      "sheet_count": 1,
+      "sheet_scan_stats": [
+        {
+          "sheet_name": "ban1_%Sig",
+          "outline_chunk_count": 3,
+          "outline_estimated_input_tokens": 191327
+        }
+      ],
+      "golden_report": {
+        "schema_name": "golden_table_recognition_report",
+        "schema_version": "0.1.0-poc",
+        "table_count": 3,
+        "outline_covered_table_count": 3,
+        "outline_missed_table_count": 0,
+        "outline_coverage_rate": 1.0,
+        "validation_outcome_distribution": {},
+        "breakdowns": {
+          "source_family=Quantum|sheet=ban1_%Sig|header_depth=2|significance_layout=following_row": {
+            "outline_covered": 3,
+            "total": 3
+          }
+        }
+      }
+    }
+  },
+  "interpretation": "覆盖率仅表示 Python Outline chunk 覆盖 Golden 坐标；不代表 AI 已正确识别物理表边界。"
+}

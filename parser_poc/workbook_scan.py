@@ -265,6 +265,18 @@ def xlsx_sheet_metadata(path: Path) -> Dict[str, Dict[str, Any]]:
             target = targets[relationship_id]
             xml_path = target if target.startswith("xl/") else "xl/" + target
             tree = ET.fromstring(archive.read(xml_path))
+            # Excel 的 dimension 可能因为历史格式、清空操作而延伸到数万空行。
+            # 仅把含值、inline text 或公式的单元格视为内容；纯样式单元格不应扩大 AI 的扫描范围。
+            content_rows = []
+            for row in tree.findall("main:sheetData/main:row", namespaces):
+                has_content = any(
+                    cell.find("main:v", namespaces) is not None
+                    or cell.find("main:is", namespaces) is not None
+                    or cell.find("main:f", namespaces) is not None
+                    for cell in row.findall("main:c", namespaces)
+                )
+                if has_content:
+                    content_rows.append(int(row.attrib["r"]))
             merges = []
             for merge in tree.findall("main:mergeCells/main:mergeCell", namespaces):
                 reference = merge.attrib["ref"]
@@ -296,6 +308,7 @@ def xlsx_sheet_metadata(path: Path) -> Dict[str, Dict[str, Any]]:
                 "merged_ranges": merges,
                 "hidden_rows": hidden_row_numbers,
                 "hidden_columns": hidden_column_letters,
+                "last_content_row": max(content_rows, default=1),
             }
     return metadata
 
@@ -397,14 +410,19 @@ def build_sheet_chunks(
     layout_metadata: Dict[str, Any],
     target_tokens: int,
     hard_tokens: int,
+    max_row: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
+    scan_max_row = max_row or value_sheet.max_row
     summaries = []
-    for row_number, (value_cells, formula_cells) in enumerate(zip(value_sheet.iter_rows(), formula_sheet.iter_rows()), 1):
+    for row_number, (value_cells, formula_cells) in enumerate(
+        zip(value_sheet.iter_rows(max_row=scan_max_row), formula_sheet.iter_rows(max_row=scan_max_row)),
+        1,
+    ):
         summaries.append(row_summary(value_cells, formula_cells, row_number))
     return build_chunks_from_rows(
         compact_blank_rows(summaries),
         value_sheet.title,
-        value_sheet.max_row,
+        scan_max_row,
         value_sheet.max_column,
         layout_metadata["merged_ranges"],
         layout_metadata["hidden_rows"],
@@ -419,15 +437,17 @@ def build_sheet_outline_chunks(
     layout_metadata: Dict[str, Any],
     target_tokens: int,
     hard_tokens: int,
+    max_row: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
+    scan_max_row = max_row or value_sheet.max_row
     summaries = [
         outline_row_summary(value_cells, row_number)
-        for row_number, value_cells in enumerate(value_sheet.iter_rows(), 1)
+        for row_number, value_cells in enumerate(value_sheet.iter_rows(max_row=scan_max_row), 1)
     ]
     return build_chunks_from_rows(
         compact_blank_rows(summaries),
         value_sheet.title,
-        value_sheet.max_row,
+        scan_max_row,
         value_sheet.max_column,
         layout_metadata["merged_ranges"],
         layout_metadata["hidden_rows"],
@@ -532,17 +552,26 @@ def scan_xlsx(
         if name not in value_book.sheetnames:
             raise ValueError("Sheet not found: %s" % name)
         value_sheet = value_book[name]
+        # 保留原始 Excel used range 作为可审计事实，同时只扫描末个内容行之前的区域。
+        scan_max_row = min(value_sheet.max_row, int(layout[name]["last_content_row"]))
         sheet_payload = {
             "sheet_name": name,
             "used_range": "A1:%s%s" % (get_column_letter(value_sheet.max_column), value_sheet.max_row),
+            "scan_range": "A1:%s%s" % (get_column_letter(value_sheet.max_column), scan_max_row),
             "is_hidden_sheet": layout[name]["is_hidden_sheet"],
-            "outline_chunks": build_sheet_outline_chunks(value_sheet, layout[name], target_tokens, hard_tokens),
+            "outline_chunks": build_sheet_outline_chunks(
+                value_sheet,
+                layout[name],
+                target_tokens,
+                hard_tokens,
+                max_row=scan_max_row,
+            ),
         }
         if detail_ranges:
             formula_book = load_workbook(path, read_only=True, data_only=False)
             windows = plan_detail_windows(
                 detail_ranges,
-                value_sheet.max_row,
+                scan_max_row,
                 detail_context_before,
                 detail_context_after,
                 max_candidate_gap_rows,

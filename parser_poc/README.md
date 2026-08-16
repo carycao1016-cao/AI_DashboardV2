@@ -27,7 +27,8 @@ Use one or more `--detail-range start:end` arguments with `--sheet` to build sec
 
 - `contracts.py` defines Pydantic contracts for Layer 1 response, Detail Window request, Layer 2 proposal and Python validation result.
 - `orchestration.py` contains a provider-neutral adapter protocol and `ControlledStubAdapter`. The Stub returns only explicitly supplied fixtures; it does not infer a table or call a model.
-- `golden_evaluation.py` reads structural fields from `Golden_Annotation_Template.xlsx` and emits aggregate coverage and validation statuses without question text, labels or numeric values.
+- `golden_evaluation.py` reads structural fields from `Golden_Annotation_Final.xlsx` and emits aggregate coverage and validation statuses without question text, labels or numeric values.
+- `golden_scan_evaluation.py` scans every source file registered in the final Golden workbook and records Layer 1 Outline coverage. It does not treat an Outline chunk as an AI table-boundary result.
 
 The orchestrator currently validates physical bounds and declared region overlap only. It is intentionally not a value extractor, a significance mapper or a production acceptance engine.
 
@@ -49,3 +50,12 @@ The orchestrator currently validates physical bounds and declared region overlap
 ```bash
 .venv/bin/python -m unittest discover -s parser_poc/tests -v
 ```
+
+## Full Golden scan
+
+```bash
+.venv/bin/python -m parser_poc.golden_scan_evaluation \
+  --output outputs/full_scan_report.json
+```
+
+The report records source-specific chunk counts, estimated Outline input tokens and Golden coverage. A `covered` result means that a Python-produced Outline chunk contains an annotated Header or first data row. It must not be interpreted as a successful Layer 1 AI recognition result.
