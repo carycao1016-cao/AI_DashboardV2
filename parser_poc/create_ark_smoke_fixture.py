@@ -14,12 +14,12 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter, range_boundaries
 
 
-def create_fixture(source: Path, output: Path, *, sheet_name: str, max_row: int, max_column: int) -> None:
+def create_fixture(source: Path, output: Path, *, sheet_name: str, min_row: int, max_row: int, max_column: int) -> None:
     source_book = load_workbook(source, data_only=False)
     if sheet_name not in source_book.sheetnames:
         raise ValueError("Sheet not found: %s" % sheet_name)
     source_sheet = source_book[sheet_name]
-    if max_row < 1 or max_column < 1:
+    if min_row < 1 or max_row < min_row or max_column < 1:
         raise ValueError("Fixture bounds must be positive")
 
     fixture_book = load_workbook(source, data_only=False)
@@ -28,7 +28,7 @@ def create_fixture(source: Path, output: Path, *, sheet_name: str, max_row: int,
         del fixture_book[name]
     target_sheet = fixture_book.create_sheet(sheet_name)
 
-    for row in source_sheet.iter_rows(min_row=1, max_row=max_row, min_col=1, max_col=max_column):
+    for row in source_sheet.iter_rows(min_row=min_row, max_row=max_row, min_col=1, max_col=max_column):
         for source_cell in row:
             target_cell = target_sheet[source_cell.coordinate]
             target_cell.value = source_cell.value
@@ -42,14 +42,14 @@ def create_fixture(source: Path, output: Path, *, sheet_name: str, max_row: int,
                 target_cell.protection = copy(source_cell.protection)
 
     for reference in source_sheet.merged_cells.ranges:
-        min_col, min_row, source_max_col, source_max_row = range_boundaries(str(reference))
-        if min_row >= 1 and source_max_row <= max_row and min_col >= 1 and source_max_col <= max_column:
+        min_col, merged_min_row, source_max_col, source_max_row = range_boundaries(str(reference))
+        if merged_min_row >= min_row and source_max_row <= max_row and min_col >= 1 and source_max_col <= max_column:
             target_sheet.merge_cells(str(reference))
     for index in range(1, max_column + 1):
         letter = get_column_letter(index)
         if letter in source_sheet.column_dimensions:
             target_sheet.column_dimensions[letter] = copy(source_sheet.column_dimensions[letter])
-    for index in range(1, max_row + 1):
+    for index in range(min_row, max_row + 1):
         if index in source_sheet.row_dimensions:
             target_sheet.row_dimensions[index] = copy(source_sheet.row_dimensions[index])
     target_sheet.freeze_panes = source_sheet.freeze_panes
@@ -71,6 +71,7 @@ def main() -> None:
         default=Path(__file__).parents[1] / "outputs/ark_smoke/Tabs_%95_first_table.xlsx",
     )
     parser.add_argument("--sheet", default="ban1_%Sig")
+    parser.add_argument("--min-row", type=int, default=1)
     parser.add_argument("--max-row", type=int, default=78)
     parser.add_argument("--max-column", type=int, default=28)
     args = parser.parse_args()
@@ -78,6 +79,7 @@ def main() -> None:
         args.source,
         args.output,
         sheet_name=args.sheet,
+        min_row=args.min_row,
         max_row=args.max_row,
         max_column=args.max_column,
     )

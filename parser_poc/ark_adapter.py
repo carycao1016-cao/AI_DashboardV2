@@ -197,6 +197,12 @@ class ArkStructuredAdapter:
                 "regions 中的行必须使用源文件绝对行号。不要为了缩短范围而删除表前或表后的结构行；"
                 "如果上下边界不确定，应保守包含可见的相邻结构行，并让 Python 后续校验。"
             )
+        elif task_name == "sheet_outline":
+            system_message += (
+                " 只有在行结构显示出真实的 Tab 矩阵（表头、行标签、连续数据区域或明确 Base）时才返回 candidates。"
+                "目录、导航、Index、Summary、元数据、代码表、说明文字或缺少数据矩阵的 Sheet 不应创建候选；"
+                "这类内容应返回 candidates=[]，并用 unclassified_ranges 说明 non_tab_content 或 sheet_context。"
+            )
         user_message = json.dumps(
             {
                 "task_name": task_name,
@@ -205,7 +211,7 @@ class ArkStructuredAdapter:
                 "boundary_contract": (
                     "full_physical_table_range_including_title_header_base_data_footnote"
                     if task_name == "detail_window"
-                    else "coarse_candidate_only"
+                    else "coarse_candidate_only_and_no_non_tab_candidates"
                 ),
             },
             ensure_ascii=False,

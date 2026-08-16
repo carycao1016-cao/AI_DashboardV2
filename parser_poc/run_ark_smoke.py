@@ -20,6 +20,7 @@ def main() -> None:
     )
     parser.add_argument("--sheet", default="ban1_%Sig")
     parser.add_argument("--expected-range", default="A1:AB78")
+    parser.add_argument("--expect-not-a-table", action="store_true")
     parser.add_argument(
         "--output",
         type=Path,
@@ -54,10 +55,12 @@ def main() -> None:
         "source_file": args.input.name,
         "sheet_name": args.sheet,
         "expected_golden_table_range": args.expected_range,
+        "expected_not_a_table": args.expect_not_a_table,
         "outline_candidate_count": sum(len(response.candidates) for response in outlines),
         "detail_window_count": len(details),
         "proposals": proposals,
         "call_records": adapter.call_records,
+        "not_a_table_false_positive": args.expect_not_a_table and bool(outlines and any(response.candidates for response in outlines)),
         "interpretation": "物理范围校验通过不等于 Golden 完整边界正确；仅 exact_range_match=true 才表示本 Smoke 的完整范围匹配。",
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

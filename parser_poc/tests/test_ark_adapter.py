@@ -73,6 +73,21 @@ class ArkStructuredAdapterTests(unittest.TestCase):
             True,
         )
 
+    def test_outline_prompt_rejects_non_tab_content(self):
+        requests = []
+
+        def transport(request, _timeout):
+            requests.append(json.loads(request.data.decode("utf-8")))
+            return json.dumps({"choices": [{"message": {"content": '{"sheet_name":"Index","chunk_id":"c1","candidates":[],"unclassified_ranges":[]}'}}]}).encode("utf-8")
+
+        adapter = ArkStructuredAdapter(
+            profile="deepseek",
+            config=ArkConnectionConfig(api_key="test-secret", model="ep-test"),
+            transport=transport,
+        )
+        adapter.generate_structured(task_name="sheet_outline", payload={"sheet_name": "Index", "rows": []}, output_model=SheetOutlineResponse)
+        self.assertIn("缺少数据矩阵", requests[0]["messages"][0]["content"])
+
     def test_fails_after_one_invalid_output_repair(self):
         adapter, _requests = self._adapter([
             {"choices": [{"message": {"content": "not json"}}]},
