@@ -7,3 +7,6 @@ outputs/golden_annotation_final/qa/
 parser_poc/.env.ark
 .venv/
 *.egg-info/
+node_modules/
+dist/
+*.tsbuildinfo
