@@ -2,3 +2,5 @@
 parser_poc/output/
 __pycache__/
 *.pyc
+outputs/archive/
+outputs/golden_annotation_final/qa/
