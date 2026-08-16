@@ -14,6 +14,8 @@ from parser_poc.workbook_scan import approximate_display_value, cell_type, json_
 
 
 _MISSING_TEXT = {"-", "- ", "—", "–"}
+_HEADER_CODE_PATTERN = re.compile(r"\(([A-Za-z]+)\)\s*$")
+_STANDALONE_CODE_PATTERN = re.compile(r"^[A-Za-z]+$")
 
 
 def _availability(value: Any) -> str:
@@ -50,6 +52,42 @@ def _question_number(text: str) -> str:
     return match.group(1) if match else ""
 
 
+def _header_significance_code(path_values: list[Any]) -> str:
+    """从独立代码行或 ``Total (A)`` 形式的表头提取比较代码。"""
+    for value in reversed(path_values):
+        if value in (None, ""):
+            continue
+        text = str(value).strip()
+        parenthesized = _HEADER_CODE_PATTERN.search(text)
+        if parenthesized:
+            return parenthesized.group(1)
+        if _STANDALONE_CODE_PATTERN.fullmatch(text):
+            return text
+    return ""
+
+
+def _data_columns_for_layout(
+    *,
+    sheet: Any,
+    min_column: int,
+    max_column: int,
+    header_rows: list[int],
+    layout: SignificanceLayout,
+) -> list[int]:
+    """确定真正承载数值的列，避免把 Decipher 相邻显著性列作为指标列。"""
+    columns = list(range(max(2, min_column), max_column + 1))
+    if layout != SignificanceLayout.ADJACENT_COLUMN:
+        return columns
+    data_columns = []
+    for column in columns:
+        # Decipher 的 marker/间隔列没有自己的表头；合并单元格在 read_only
+        # 模式下仅左上角有值，因此不能用“上一列有父表头”来推断其为数值列。
+        has_own_header = any(sheet.cell(row, column).value not in (None, "") for row in header_rows)
+        if has_own_header:
+            data_columns.append(column)
+    return data_columns
+
+
 def extract_validated_table(
     *,
     path: Path,
@@ -73,7 +111,13 @@ def extract_validated_table(
             review_status = "review_required"
         else:
             review_status = "auto_approved"
-        data_columns = list(range(max(2, min_col), max_col + 1))
+        data_columns = _data_columns_for_layout(
+            sheet=value_sheet,
+            min_column=min_col,
+            max_column=max_col,
+            header_rows=proposal.regions.header_rows,
+            layout=proposal.regions.significance_layout,
+        )
         header_ids: dict[int, str] = {}
         header_items = []
         label_map: dict[str, str] = {}
@@ -81,7 +125,7 @@ def extract_validated_table(
         for column in data_columns:
             path_values = [value_sheet.cell(row, column).value for row in proposal.regions.header_rows]
             non_empty_path = [str(value).strip() for value in path_values if value not in (None, "")]
-            code = str(value_sheet.cell(last_header_row, column).value).strip() if last_header_row and value_sheet.cell(last_header_row, column).value not in (None, "") else ""
+            code = _header_significance_code(path_values)
             header_id = "%s_H%s" % (extracted_table_id, column)
             header_ids[column] = header_id
             if code:

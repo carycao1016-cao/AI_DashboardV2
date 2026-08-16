@@ -76,3 +76,31 @@ class ExtractionTests(unittest.TestCase):
             extracted_table_id="Q03_01",
         )
         self.assertEqual(result["rows"][0]["cells"][0]["original_significance_marker"], "D")
+
+    def test_decipher_adjacent_significance_columns_are_not_extracted_as_data(self):
+        proposal = TableBoundaryProposal(
+            proposal_id="p4",
+            candidate_id="c4",
+            sheet_name="Percentages_Sig1",
+            source_range="A12:AW18",
+            regions=TableRegions(
+                title_rows=[12],
+                header_rows=[14, 15],
+                base_rows=[16],
+                data_rows=[17, 18],
+                significance_layout=SignificanceLayout.ADJACENT_COLUMN,
+            ),
+        )
+        result = extract_validated_table(
+            path=Path(__file__).parents[2] / "outputs/ark_smoke/fixtures/Decipher_Percentages_Sig1_first_table.xlsx",
+            proposal=proposal,
+            validation=BoundaryValidationResult(proposal_id="p4", outcome=ValidationOutcome.ACCEPTED),
+            extracted_table_id="D01_01",
+            metric_type="percentage",
+        )
+        self.assertEqual([header["data_column"] for header in result["headers"][:3]], ["B", "D", "F"])
+        self.assertNotIn("E", [header["data_column"] for header in result["headers"]])
+        male_cell = next(cell for cell in result["rows"][1]["cells"] if cell["source_cell"] == "D17")
+        self.assertEqual(male_cell["original_significance_marker"], "C")
+        self.assertEqual(male_cell["significance_marker_source_cell"], "E17")
+        self.assertEqual(male_cell["significance_mapping_status"], "mapped")
