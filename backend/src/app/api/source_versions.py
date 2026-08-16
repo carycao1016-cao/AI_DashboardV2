@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from parser_poc.workbook_scan import scan_workbook
+from ..infrastructure.db import add_source_file_version, get_project
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -40,6 +41,8 @@ async def create_source_version(
     replaces_source_file_version_id: str | None = Form(None),
 ) -> dict[str, object]:
     """保存一个文件版本并返回不含业务单元格值的扫描摘要。"""
+    if get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="项目不存在，请先创建项目")
     filename = _safe_filename(file.filename or "upload.xlsx")
     suffix = Path(filename).suffix.casefold()
     if suffix not in ALLOWED_SUFFIXES:
@@ -71,6 +74,21 @@ async def create_source_version(
         }
         for sheet in summary.get("sheets", [])
     ]
+    scan_summary = {"sheet_count": len(sheets), "sheets": sheets}
+    add_source_file_version(
+        project_id,
+        {
+            "source_file_version_id": version_id,
+            "file_name": filename,
+            "storage_path": str(target_path),
+            "market_scope": market_scope,
+            "wave_scope": wave_scope,
+            "upload_mode": upload_mode,
+            "replaces_source_file_version_id": replaces_source_file_version_id,
+            "scan_status": "completed",
+            "scan_summary": scan_summary,
+        },
+    )
     return {
         "success": True,
         "data": {
