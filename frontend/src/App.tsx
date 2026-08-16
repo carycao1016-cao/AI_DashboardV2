@@ -115,6 +115,20 @@ type ProcessingJob = {
   error_message: string | null;
 };
 
+type ReviewIssue = {
+  review_issue_id: string;
+  source_file_version_id: string;
+  object_type: string;
+  object_id: string;
+  issue_type: string;
+  severity: "high" | "medium" | "low";
+  message: string;
+  suggested_actions: string[];
+  status: "open" | "in_review" | "resolved" | "accepted_risk" | "excluded";
+  creator_note: string | null;
+  blocks_publication: boolean;
+};
+
 const tableRows: TableRow[] = [
   { label: "男", total: "43.9%", male: "100.0%", maleSig: "C", female: "0.0%", femaleSig: "", source: "D17" },
   { label: "女", total: "56.1%", male: "0.0%", maleSig: "", female: "100.0%", femaleSig: "B", source: "D18" },
@@ -177,6 +191,7 @@ export function App() {
   const [processingJob, setProcessingJob] = useState<ProcessingJob | null>(null);
   const [recognitionResult, setRecognitionResult] = useState<RecognitionResult | null>(null);
   const [extractionTables, setExtractionTables] = useState<ExtractedTable[]>([]);
+  const [reviewIssues, setReviewIssues] = useState<ReviewIssue[]>([]);
   const [activeView, setActiveView] = useState<WorkflowView>("overview");
 
   const applyProject = (project: ApiProject) => {
@@ -198,6 +213,13 @@ export function App() {
     if (!response.ok || !payload.success) throw new Error(payload.detail || "读取项目失败");
     const project = payload.data as ApiProject;
     applyProject(project);
+    const reviewResponse = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/review-issues`);
+    if (reviewResponse.ok) {
+      const reviewPayload = await reviewResponse.json();
+      setReviewIssues(reviewPayload.success ? (reviewPayload.data.issues as ReviewIssue[]) : []);
+    } else {
+      setReviewIssues([]);
+    }
     const completedVersion = project.source_file_versions.find((version) => version.scan_status === "completed");
     if (!completedVersion) {
       setRecognitionResult(null);
@@ -283,6 +305,23 @@ export function App() {
       setProjectError(error instanceof Error ? error.message : "读取项目失败");
     }
   };
+
+  const resolveReviewIssue = async (issue: ReviewIssue) => {
+    try {
+      const response = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${projectId}/review-issues/${issue.review_issue_id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "resolved" }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.detail || "无法保存 Review 结论");
+      setReviewIssues((current) => current.map((item) => item.review_issue_id === issue.review_issue_id ? payload.data as ReviewIssue : item));
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : "无法保存 Review 结论");
+    }
+  };
+
+  const openReviewIssues = reviewIssues.filter((issue) => issue.status === "open" || issue.status === "in_review");
 
   const pollProcessingJob = async (id: string, jobId: string) => {
     for (let attempt = 0; attempt < 120; attempt += 1) {
@@ -398,7 +437,7 @@ export function App() {
           <div className="sidebar-label">工作流</div>
           {workflow.map(({ id, label, icon: Icon, state }) => (
             <button key={label} className={`nav-item ${activeView === id ? "active" : ""}`} onClick={() => setActiveView(id)}>
-              <Icon size={17} /><span>{label}</span>{state === "warning" && <span className="nav-count">3</span>}
+              <Icon size={17} /><span>{label}</span>{id === "review" && openReviewIssues.length > 0 && <span className="nav-count">{openReviewIssues.length}</span>}
             </button>
           ))}
         </nav>
@@ -425,11 +464,11 @@ export function App() {
           <section className="summary-grid" aria-label="项目摘要">
             <SummaryCard label="识别进度" value="86%" meta="23 / 27 张物理表" icon={<Gauge size={18} />} tone="yellow" />
             <SummaryCard label="已验证表格" value="24" meta="较上次 +6" icon={<ShieldCheck size={18} />} tone="green" />
-            <SummaryCard label="待处理问题" value="3" meta="2 个结构 · 1 个映射" icon={<AlertTriangle size={18} />} tone="orange" />
+            <SummaryCard label="待处理问题" value={String(openReviewIssues.length)} meta={openReviewIssues.length ? "由 Python 校验生成" : "当前没有阻断问题"} icon={<AlertTriangle size={18} />} tone="orange" />
             <SummaryCard label="数据版本" value="Wave 1" meta="最后更新 16:42" icon={<FileSpreadsheet size={18} />} tone="neutral" />
           </section>
 
-          <section className="notice-strip"><div className="notice-icon"><AlertTriangle size={17} /></div><div><strong>发布暂不可用</strong><span>还有 3 个问题需要处理。可以继续浏览已验证的表格。</span></div><button className="text-button">打开 Review Summary <ArrowUpRight size={14} /></button></section>
+          <section className="notice-strip"><div className="notice-icon"><AlertTriangle size={17} /></div><div><strong>{openReviewIssues.some((issue) => issue.blocks_publication) ? "发布暂不可用" : "当前无发布阻断问题"}</strong><span>{openReviewIssues.length ? `还有 ${openReviewIssues.length} 个问题需要处理。` : "没有来自当前识别结果的待确认问题。"}</span></div><button className="text-button" onClick={() => setActiveView("review")}>打开 Review Summary <ArrowUpRight size={14} /></button></section>
 
           <section className="workspace-card versions-card">
             <div className="card-heading"><div><div className="section-kicker">SOURCE FILE VERSIONS</div><h2>文件与版本</h2><p>新增文件和修正版分开处理；历史版本始终保留。</p></div><div className="version-actions"><button className="button secondary" onClick={() => { setUploadMode("append"); setShowUpload(true); }}><Plus size={15} />追加文件</button><button className="button secondary" onClick={() => { setUploadMode("replace"); setShowUpload(true); }}><Upload size={15} />替换版本</button></div></div>
@@ -445,9 +484,9 @@ export function App() {
             </div>
 
             <div className="workspace-card review-card">
-              <div className="card-heading"><div><div className="section-kicker">REVIEW SUMMARY</div><h2>需要注意的结构</h2><p>风险行保留在 Review 中，不会静默丢弃。</p></div><button className="icon-button" title="打开 Review"><ArrowUpRight size={17} /></button></div>
-              <div className="issue-list"><IssueRow number="01" title="Sigma 行被重新归类" detail="ban1_%Sig · A77 · 脚注" status="已自动修正" /><IssueRow number="02" title="缺少明确 Base" detail="ban2_%Sig · A80:AB609" status="需确认" warning /><IssueRow number="03" title="CSV 编码置信度较低" detail="tracking.csv · GB18030" status="需确认" warning /></div>
-              <button className="review-cta">打开 Review Summary <ArrowUpRight size={15} /></button>
+              <div className="card-heading"><div><div className="section-kicker">REVIEW SUMMARY</div><h2>需要注意的结构</h2><p>风险行保留在 Review 中，不会静默丢弃。</p></div><button className="icon-button" title="打开 Review" onClick={() => setActiveView("review")}><ArrowUpRight size={17} /></button></div>
+              <ReviewIssueList issues={openReviewIssues} onResolve={resolveReviewIssue} compact />
+              <button className="review-cta" onClick={() => setActiveView("review")}>打开 Review Summary <ArrowUpRight size={15} /></button>
             </div>
           </section>
 
@@ -455,7 +494,7 @@ export function App() {
             <div className="card-heading"><div><div className="section-kicker">DATA EXPLORER · {selectedSheet.toUpperCase()}</div><h2>已验证表格预览</h2><p>展示值来自 Excel display value；解析值保留原始精度和 Source Lineage。</p></div><div className="preview-actions"><button className="button secondary"><BookOpen size={15} />原始来源</button><button className="button secondary"><PanelRight size={15} />识别详情</button></div></div>
             {extractionTables.find((table) => table.source_sheet === selectedSheet) ? <ExtractedTablePreview table={extractionTables.find((item) => item.source_sheet === selectedSheet)!} /> : projectId === "prj_market-pulse" ? <><div className="table-meta"><span className="table-title-mark" /><div><strong>S1：请问您的性别是？</strong><span>Percentages_Sig1 · A12:AW18 · percentage</span></div><StatusBadge status="已验证" /><span className="meta-spacer" /><span className="lineage"><Database size={14} /> 来源坐标已保留</span></div><div className="data-preview" role="table" aria-label="表格预览"><div className="data-row data-head"><span>选项</span><span>Total (A)</span><span>Male (B)</span><span>Female (C)</span><span>来源</span></div>{tableRows.map((row) => <div className="data-row" key={row.label}><strong>{row.label}</strong><span>{row.total}</span><span>{row.male} {row.maleSig && <em className="sig-marker">{row.maleSig}</em>}</span><span>{row.female} {row.femaleSig && <em className="sig-marker">{row.femaleSig}</em>}</span><span className="mono-cell source-cell">{row.source}</span></div>)}</div><div className="table-note"><span><ShieldCheck size={14} />Python 已从源文件回读；AI 只提供结构建议</span><span><span className="legend-dot" />`-`、0 和不可用值保持区分</span></div></> : <div className="empty-workflow"><div className="empty-icon"><Database size={23} /></div><h2>当前 Sheet 尚无可展示的提取数据</h2><p>Python 已保存扫描和识别状态；通过边界校验后，真实 raw/display/parsed 数据会显示在这里。</p></div>}
           </section>
-          </> : <WorkflowPanel activeView={activeView} fileVersions={fileVersions} processingJob={processingJob} recognitionResult={recognitionResult} setShowUpload={setShowUpload} selectedSheet={selectedSheet} setSelectedSheet={setSelectedSheet} />}
+          </> : <WorkflowPanel activeView={activeView} fileVersions={fileVersions} processingJob={processingJob} recognitionResult={recognitionResult} reviewIssues={reviewIssues} onResolveReviewIssue={resolveReviewIssue} setShowUpload={setShowUpload} selectedSheet={selectedSheet} setSelectedSheet={setSelectedSheet} />}
         </div>
       </main>
 
@@ -481,7 +520,14 @@ function ExtractedTablePreview({ table }: { table: ExtractedTable }) {
   </>;
 }
 
-function WorkflowPanel({ activeView, fileVersions, processingJob, recognitionResult, setShowUpload, selectedSheet, setSelectedSheet }: { activeView: Exclude<WorkflowView, "overview">; fileVersions: FileVersion[]; processingJob: ProcessingJob | null; recognitionResult: RecognitionResult | null; setShowUpload: (open: boolean) => void; selectedSheet: string; setSelectedSheet: (sheet: string) => void }) {
+function ReviewIssueList({ issues, onResolve, compact = false }: { issues: ReviewIssue[]; onResolve: (issue: ReviewIssue) => void; compact?: boolean }) {
+  if (issues.length === 0) {
+    return <div className="empty-workflow"><div className="empty-icon"><ShieldCheck size={23} /></div><h2>当前没有待处理问题</h2><p>这里只展示 Python 校验或提取证据产生的风险项。</p></div>;
+  }
+  return <div className="issue-list">{issues.map((issue, index) => <div className="issue-row" key={issue.review_issue_id}><span className="issue-number warning">{String(index + 1).padStart(2, "0")}</span><div><strong>{issue.message}</strong><span>{issue.object_type} · {issue.object_id} · {issue.severity}</span></div><span className="issue-status warning"><AlertTriangle size={12} />{issue.status === "open" ? "需确认" : issue.status}</span>{!compact && <button className="button secondary" onClick={() => onResolve(issue)}>确认已处理</button>}</div>)}</div>;
+}
+
+function WorkflowPanel({ activeView, fileVersions, processingJob, recognitionResult, reviewIssues, onResolveReviewIssue, setShowUpload, selectedSheet, setSelectedSheet }: { activeView: Exclude<WorkflowView, "overview">; fileVersions: FileVersion[]; processingJob: ProcessingJob | null; recognitionResult: RecognitionResult | null; reviewIssues: ReviewIssue[]; onResolveReviewIssue: (issue: ReviewIssue) => void; setShowUpload: (open: boolean) => void; selectedSheet: string; setSelectedSheet: (sheet: string) => void }) {
   const panelCopy: Record<Exclude<WorkflowView, "overview">, { kicker: string; title: string; description: string }> = {
     versions: { kicker: "SOURCE FILE VERSIONS", title: "文件与版本", description: "管理追加文件和同一逻辑数据集的修正版，历史来源不会被覆盖。" },
     processing: { kicker: "PROCESSING STATUS", title: "识别进度", description: "当前没有正在运行的识别任务；启动真实任务后，这里显示阶段和后台处理状态。" },
@@ -499,7 +545,8 @@ function WorkflowPanel({ activeView, fileVersions, processingJob, recognitionRes
   const explorerSheets = recognizedSheets?.length ? recognizedSheets : sheets;
   const selectedRecognitionSheet = recognitionResult?.result.sheets?.find((sheet) => sheet.sheet_name === selectedSheet);
   const proposalsForSelectedSheet = selectedRecognitionSheet?.boundary_proposals ?? [];
-  return <section className="standalone-view"><div className="page-header"><div><div className="eyebrow">{copy.kicker} · CREATOR WORKSPACE</div><h1>{copy.title}</h1><p>{copy.description}</p></div>{activeView === "versions" && <button className="button primary" onClick={() => setShowUpload(true)}><Plus size={16} />追加文件</button>}</div>{activeView === "versions" && <div className="workspace-card standalone-card"><div className="version-list">{fileVersions.map((version, index) => <div className="version-row" key={version.id}><span className="version-number">{index === 0 ? "当前" : version.id.replace("sfv_", "v")}</span><div className="version-file"><FileSpreadsheet size={15} /><strong>{version.fileName}</strong></div><span>{version.market}</span><span>{version.wave}</span><span className="version-relation">{version.relation}</span><StatusBadge status={version.status} /><button className="icon-button" title="版本详情"><ArrowUpRight size={15} /></button></div>)}</div></div>}{activeView === "processing" && processingJob && <div className="workspace-card processing-card"><div className="section-kicker">BACKGROUND JOB · {processingJob.job_id}</div><h2>{processingJob.status === "completed" ? "识别任务已完成" : processingJob.status === "failed" ? "识别任务失败" : "识别任务处理中"}</h2><p>{processingJob.phase}。前端轮询不会把后台任务提前标记为失败。</p><div className="processing-progress"><div style={{ width: `${processingJob.progress_percent}%` }} /></div><div className="processing-meta"><span>{processingJob.progress_percent}%</span><span>{processingJob.source_file_version_id}</span></div>{processingJob.error_message && <div className="upload-error"><AlertTriangle size={14} />{processingJob.error_message}</div>}</div>}{activeView === "review" && <div className="review-detail-grid"><div className="workspace-card standalone-card"><div className="card-heading"><div><div className="section-kicker">OPEN ISSUES</div><h2>待处理问题</h2></div><span className="status-badge status-warning"><AlertTriangle size={12} />3 个待确认</span></div><div className="issue-list"><IssueRow number="01" title="Sigma 行被重新归类" detail="ban1_%Sig · A77 · 脚注" status="已自动修正" /><IssueRow number="02" title="缺少明确 Base" detail="ban2_%Sig · A80:AB609" status="需确认" warning /><IssueRow number="03" title="CSV 编码置信度较低" detail="tracking.csv · GB18030" status="需确认" warning /></div></div><div className="workspace-card risk-explanation"><div className="section-kicker">PUBLICATION GATE</div><h2>发布暂不可用</h2><p>有 3 个风险项未完成确认。修正会保留源坐标和审计记录。</p><button className="button secondary">查看发布门禁 <ArrowUpRight size={15} /></button></div></div>}{activeView === "explorer" && <div className="workspace-card standalone-card"><div className="table-toolbar"><label className="search-box"><Search size={16} /><input placeholder="搜索 Sheet 或来源类型" /></label><button className="filter-button">全部状态 <ChevronDown size={14} /></button></div><div className="sheet-table" role="table" aria-label="Data Explorer Sheet 列表">{explorerSheets.map((sheet) => <button key={sheet.name} className={`sheet-row ${selectedSheet === sheet.name ? "selected" : ""}`} onClick={() => setSelectedSheet(sheet.name)}><span className="sheet-name"><FileSpreadsheet size={16} /><span><strong>{sheet.name}</strong><small>{sheet.family}</small></span></span><span>{sheet.tables || "—"}</span><span className="mono-cell">{sheet.range}</span><span><StatusBadge status={sheet.status} /></span><ArrowUpRight size={15} /></button>)}</div><div className="table-note"><span><Database size={14} />选中 {selectedSheet} 后可进入表格预览</span><span>Source Lineage 已保留</span></div></div>}{activeView === "explorer" && selectedRecognitionSheet && <div className="workspace-card recognition-detail-card"><div className="section-kicker">VALIDATED STRUCTURE · {selectedRecognitionSheet.sheet_name}</div><h2>物理表结构提案</h2>{proposalsForSelectedSheet.length === 0 ? <p>当前 Sheet 没有返回物理表提案。</p> : proposalsForSelectedSheet.map((proposal, index) => <div className="proposal-row" key={`${proposal.source_range}-${index}`}><strong>{proposal.source_range}</strong><span>Header: {proposal.regions?.header_rows?.join(", ") || "—"}</span><span>Base: {proposal.regions?.base_rows?.join(", ") || "—"}</span><span>Data: {proposal.regions?.data_rows?.join(", ") || "—"}</span><span>Footnote: {proposal.regions?.footnote_rows?.join(", ") || "—"}</span><span>Sig: {proposal.regions?.significance_layout || "none"}</span></div>)}</div>}{activeView === "dashboard" && <div className="workspace-card empty-workflow"><div className="empty-icon"><CircleHelp size={23} /></div><h2>Dashboard Draft 尚未启用</h2><p>完成表格识别、Review 和语义绑定后，才能安全创建可发布的 Dashboard Draft。</p></div>}{activeView === "processing" && !processingJob && <div className="workspace-card empty-workflow"><div className="empty-icon"><CircleHelp size={23} /></div><h2>等待识别任务</h2><p>上传文件后，后台任务会在这里显示 Workbook 扫描和后续识别阶段。</p><button className="button secondary" onClick={() => setShowUpload(true)}><Upload size={15} />返回上传文件</button></div>}</section>;
+  const openIssues = reviewIssues.filter((issue) => issue.status === "open" || issue.status === "in_review");
+  return <section className="standalone-view"><div className="page-header"><div><div className="eyebrow">{copy.kicker} · CREATOR WORKSPACE</div><h1>{copy.title}</h1><p>{copy.description}</p></div>{activeView === "versions" && <button className="button primary" onClick={() => setShowUpload(true)}><Plus size={16} />追加文件</button>}</div>{activeView === "versions" && <div className="workspace-card standalone-card"><div className="version-list">{fileVersions.map((version, index) => <div className="version-row" key={version.id}><span className="version-number">{index === 0 ? "当前" : version.id.replace("sfv_", "v")}</span><div className="version-file"><FileSpreadsheet size={15} /><strong>{version.fileName}</strong></div><span>{version.market}</span><span>{version.wave}</span><span className="version-relation">{version.relation}</span><StatusBadge status={version.status} /><button className="icon-button" title="版本详情"><ArrowUpRight size={15} /></button></div>)}</div></div>}{activeView === "processing" && processingJob && <div className="workspace-card processing-card"><div className="section-kicker">BACKGROUND JOB · {processingJob.job_id}</div><h2>{processingJob.status === "completed" ? "识别任务已完成" : processingJob.status === "failed" ? "识别任务失败" : "识别任务处理中"}</h2><p>{processingJob.phase}。前端轮询不会把后台任务提前标记为失败。</p><div className="processing-progress"><div style={{ width: `${processingJob.progress_percent}%` }} /></div><div className="processing-meta"><span>{processingJob.progress_percent}%</span><span>{processingJob.source_file_version_id}</span></div>{processingJob.error_message && <div className="upload-error"><AlertTriangle size={14} />{processingJob.error_message}</div>}</div>}{activeView === "review" && <div className="review-detail-grid"><div className="workspace-card standalone-card"><div className="card-heading"><div><div className="section-kicker">OPEN ISSUES</div><h2>待处理问题</h2></div><span className="status-badge status-warning"><AlertTriangle size={12} />{openIssues.length} 个待确认</span></div><ReviewIssueList issues={openIssues} onResolve={onResolveReviewIssue} /></div><div className="workspace-card risk-explanation"><div className="section-kicker">PUBLICATION GATE</div><h2>{openIssues.some((issue) => issue.blocks_publication) ? "发布暂不可用" : "当前无发布阻断问题"}</h2><p>{openIssues.length ? "风险项未完成确认，源坐标和审计记录会被保留。" : "当前识别结果没有待处理的发布风险。"}</p></div></div>}{activeView === "explorer" && <div className="workspace-card standalone-card"><div className="table-toolbar"><label className="search-box"><Search size={16} /><input placeholder="搜索 Sheet 或来源类型" /></label><button className="filter-button">全部状态 <ChevronDown size={14} /></button></div><div className="sheet-table" role="table" aria-label="Data Explorer Sheet 列表">{explorerSheets.map((sheet) => <button key={sheet.name} className={`sheet-row ${selectedSheet === sheet.name ? "selected" : ""}`} onClick={() => setSelectedSheet(sheet.name)}><span className="sheet-name"><FileSpreadsheet size={16} /><span><strong>{sheet.name}</strong><small>{sheet.family}</small></span></span><span>{sheet.tables || "—"}</span><span className="mono-cell">{sheet.range}</span><span><StatusBadge status={sheet.status} /></span><ArrowUpRight size={15} /></button>)}</div><div className="table-note"><span><Database size={14} />选中 {selectedSheet} 后可进入表格预览</span><span>Source Lineage 已保留</span></div></div>}{activeView === "explorer" && selectedRecognitionSheet && <div className="workspace-card recognition-detail-card"><div className="section-kicker">VALIDATED STRUCTURE · {selectedRecognitionSheet.sheet_name}</div><h2>物理表结构提案</h2>{proposalsForSelectedSheet.length === 0 ? <p>当前 Sheet 没有返回物理表提案。</p> : proposalsForSelectedSheet.map((proposal, index) => <div className="proposal-row" key={`${proposal.source_range}-${index}`}><strong>{proposal.source_range}</strong><span>Header: {proposal.regions?.header_rows?.join(", ") || "—"}</span><span>Base: {proposal.regions?.base_rows?.join(", ") || "—"}</span><span>Data: {proposal.regions?.data_rows?.join(", ") || "—"}</span><span>Footnote: {proposal.regions?.footnote_rows?.join(", ") || "—"}</span><span>Sig: {proposal.regions?.significance_layout || "none"}</span></div>)}</div>}{activeView === "dashboard" && <div className="workspace-card empty-workflow"><div className="empty-icon"><CircleHelp size={23} /></div><h2>Dashboard Draft 尚未启用</h2><p>完成表格识别、Review 和语义绑定后，才能安全创建可发布的 Dashboard Draft。</p></div>}{activeView === "processing" && !processingJob && <div className="workspace-card empty-workflow"><div className="empty-icon"><CircleHelp size={23} /></div><h2>等待识别任务</h2><p>上传文件后，后台任务会在这里显示 Workbook 扫描和后续识别阶段。</p><button className="button secondary" onClick={() => setShowUpload(true)}><Upload size={15} />返回上传文件</button></div>}</section>;
 }
 
 function IssueRow({ number, title, detail, status, warning = false }: { number: string; title: string; detail: string; status: string; warning?: boolean }) {

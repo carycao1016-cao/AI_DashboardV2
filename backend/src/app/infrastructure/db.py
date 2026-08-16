@@ -66,6 +66,13 @@ def initialize_database() -> None:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS review_issue_states (
+                review_issue_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(project_id),
+                status TEXT NOT NULL,
+                creator_note TEXT,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         # 兼容上一轮已创建的本地 SQLite 文件；正式环境由迁移工具管理。
@@ -252,3 +259,38 @@ def get_latest_processing_job(project_id: str, source_file_version_id: str, job_
             (project_id, source_file_version_id, job_type),
         ).fetchone()
     return get_processing_job(project_id, row["job_id"]) if row else None
+
+
+def get_review_issue_states(project_id: str) -> dict[str, dict[str, Any]]:
+    """读取 Creator 对自动生成问题的处理状态，不保存或改写源单元格。"""
+    with connect() as connection:
+        rows = connection.execute(
+            "SELECT * FROM review_issue_states WHERE project_id = ?", (project_id,)
+        ).fetchall()
+    return {
+        row["review_issue_id"]: {
+            "status": row["status"],
+            "creator_note": row["creator_note"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    }
+
+
+def set_review_issue_state(
+    project_id: str,
+    review_issue_id: str,
+    status: str,
+    creator_note: str | None,
+) -> None:
+    """写入 Review 处置结论；问题证据仍由识别/提取结果重新计算。"""
+    with connect() as connection:
+        connection.execute(
+            """INSERT INTO review_issue_states(review_issue_id, project_id, status, creator_note)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(review_issue_id) DO UPDATE SET
+                status = excluded.status,
+                creator_note = excluded.creator_note,
+                updated_at = CURRENT_TIMESTAMP""",
+            (review_issue_id, project_id, status, creator_note),
+        )

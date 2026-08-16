@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import re
 import uuid
+from hashlib import sha256
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, status
 
-from ..infrastructure.db import add_source_file_version, create_processing_job, get_latest_processing_job, get_processing_job, get_project, get_source_file_version
+from ..infrastructure.db import add_source_file_version, create_processing_job, get_latest_processing_job, get_processing_job, get_project, get_review_issue_states, get_source_file_version, set_review_issue_state
 from ..pipelines.ingestion import run_workbook_scan
 from ..pipelines.recognition import run_ai_recognition
+from ..schemas.projects import ResolveReviewIssueRequest
 from ..settings import AI_ENABLED
 
 
@@ -24,6 +26,80 @@ UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 ALLOWED_SUFFIXES = {".xlsx", ".csv"}
 
 router = APIRouter(prefix="/api/projects", tags=["source-versions"])
+
+
+def _review_issue_id(source_file_version_id: str, object_id: str, issue_type: str) -> str:
+    """同一源版本的同一结构问题得到稳定 ID，方便保存人工处置状态。"""
+    token = f"{source_file_version_id}:{object_id}:{issue_type}".encode("utf-8")
+    return f"issue_{sha256(token).hexdigest()[:16]}"
+
+
+def _build_review_issues(project_id: str, source_file_version_id: str) -> list[dict[str, object]]:
+    """仅根据 Python 校验和提取证据生成问题，未知信息不做业务猜测。"""
+    job = get_latest_processing_job(project_id, source_file_version_id, "recognition")
+    if job is None:
+        return []
+    result = job.get("result") or {}
+    sheets = result.get("sheets") if isinstance(result, dict) else []
+    states = get_review_issue_states(project_id)
+    issues: list[dict[str, object]] = []
+    for sheet in sheets if isinstance(sheets, list) else []:
+        if not isinstance(sheet, dict):
+            continue
+        proposals = sheet.get("boundary_proposals", [])
+        validations = sheet.get("boundary_validations", [])
+        for index, validation in enumerate(validations if isinstance(validations, list) else []):
+            if not isinstance(validation, dict) or validation.get("outcome") not in {"review_required", "rejected"}:
+                continue
+            proposal = proposals[index] if isinstance(proposals, list) and index < len(proposals) and isinstance(proposals[index], dict) else {}
+            object_id = str(validation.get("proposal_id") or proposal.get("proposal_id") or f"{sheet.get('sheet_name', 'sheet')}_{index}")
+            issue_type = "boundary_validation_failed"
+            issue_id = _review_issue_id(source_file_version_id, object_id, issue_type)
+            issue = {
+                "review_issue_id": issue_id,
+                "project_id": project_id,
+                "source_file_version_id": source_file_version_id,
+                "object_type": "table_boundary",
+                "object_id": object_id,
+                "field_name": "source_range",
+                "issue_type": issue_type,
+                "risk_class": "publishing_blocker",
+                "severity": "high",
+                "message": f"{sheet.get('sheet_name', 'Sheet')} 的物理表边界未通过 Python 校验。",
+                "suggested_actions": ["review_source_range", "exclude_from_dashboard"],
+                "blocks_publication": True,
+            }
+            issue.update(states.get(issue_id, {"status": "open", "creator_note": None}))
+            issues.append(issue)
+        for table in sheet.get("extracted_tables", []) if isinstance(sheet.get("extracted_tables"), list) else []:
+            if not isinstance(table, dict):
+                continue
+            unresolved_cells = [
+                cell for row in table.get("rows", []) if isinstance(row, dict)
+                for cell in row.get("cells", []) if isinstance(cell, dict) and cell.get("significance_mapping_status") == "unresolved"
+            ]
+            if not unresolved_cells:
+                continue
+            object_id = str(table.get("extracted_table_id", "table"))
+            issue_type = "significance_mapping_unresolved"
+            issue_id = _review_issue_id(source_file_version_id, object_id, issue_type)
+            issue = {
+                "review_issue_id": issue_id,
+                "project_id": project_id,
+                "source_file_version_id": source_file_version_id,
+                "object_type": "extracted_table",
+                "object_id": object_id,
+                "field_name": "significance_schema.label_map",
+                "issue_type": issue_type,
+                "risk_class": "publishing_blocker",
+                "severity": "high",
+                "message": f"{len(unresolved_cells)} 个显著性标记无法映射到表头，原始标记已保留。",
+                "suggested_actions": ["review_significance_mapping", "exclude_from_dashboard"],
+                "blocks_publication": True,
+            }
+            issue.update(states.get(issue_id, {"status": "open", "creator_note": None}))
+            issues.append(issue)
+    return issues
 
 
 def _safe_filename(name: str) -> str:
@@ -163,3 +239,41 @@ def get_extraction(project_id: str, source_file_version_id: str) -> dict[str, ob
             "tables": extracted_tables,
         },
     }
+
+
+@router.get("/{project_id}/review-issues")
+def get_review_issues(project_id: str) -> dict[str, object]:
+    """返回当前项目所有源版本的真实 Review 问题。"""
+    project = get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    issues = [
+        issue
+        for version in project["source_file_versions"]
+        for issue in _build_review_issues(project_id, version["source_file_version_id"])
+    ]
+    return {"success": True, "data": {"issues": issues}}
+
+
+@router.post("/{project_id}/review-issues/{review_issue_id}")
+def resolve_review_issue(
+    project_id: str,
+    review_issue_id: str,
+    request: ResolveReviewIssueRequest,
+) -> dict[str, object]:
+    """保存 Creator 的处置结论；只更新状态和备注，不改写解析数据。"""
+    project = get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    current_issues = [
+        issue
+        for version in project["source_file_versions"]
+        for issue in _build_review_issues(project_id, version["source_file_version_id"])
+    ]
+    issue = next((item for item in current_issues if item["review_issue_id"] == review_issue_id), None)
+    if issue is None:
+        raise HTTPException(status_code=404, detail="Review 问题不存在或已过期")
+    set_review_issue_state(project_id, review_issue_id, request.status, request.creator_note)
+    issue["status"] = request.status
+    issue["creator_note"] = request.creator_note
+    return {"success": True, "data": issue}
