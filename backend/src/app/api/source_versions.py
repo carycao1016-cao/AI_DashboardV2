@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, status
 
-from ..infrastructure.db import add_source_file_version, create_processing_job, get_processing_job, get_project, get_source_file_version
+from ..infrastructure.db import add_source_file_version, create_processing_job, get_latest_processing_job, get_processing_job, get_project, get_source_file_version
 from ..pipelines.ingestion import run_workbook_scan
 from ..pipelines.recognition import run_ai_recognition
 from ..settings import AI_ENABLED
@@ -121,3 +121,21 @@ def start_recognition(
     create_processing_job(job_id, project_id, source_file_version_id, "recognition")
     background_tasks.add_task(run_ai_recognition, job_id, version["storage_path"])
     return {"success": True, "data": {"job_id": job_id, "source_file_version_id": source_file_version_id, "status": "queued"}}
+
+
+@router.get("/{project_id}/source-versions/{source_file_version_id}/recognition-results")
+def get_recognition_results(project_id: str, source_file_version_id: str) -> dict[str, object]:
+    """读取最近一次 AI 识别的结构提案和 Python 校验结果。"""
+    job = get_latest_processing_job(project_id, source_file_version_id, "recognition")
+    if job is None:
+        raise HTTPException(status_code=404, detail="尚无 AI 识别结果")
+    return {
+        "success": True,
+        "data": {
+            "job_id": job["job_id"],
+            "source_file_version_id": source_file_version_id,
+            "status": job["status"],
+            "phase": job["phase"],
+            "result": job["result"],
+        },
+    }

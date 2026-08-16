@@ -34,6 +34,13 @@ def run_ai_recognition(job_id: str, source_path: str) -> None:
                 "sheet_name": sheet_name,
                 "outline_response_count": len(outlines),
                 "detail_response_count": len(details),
+                "outline_responses": [response.model_dump(mode="json") for response in outlines],
+                "boundary_proposals": [
+                    proposal.model_dump(mode="json")
+                    for response in details
+                    for proposal in response.proposals
+                ],
+                "boundary_validations": [validation.model_dump(mode="json") for validation in validations],
                 "validation_outcome_counts": {
                     outcome.value: sum(1 for item in validations if item.outcome == outcome)
                     for outcome in {item.outcome for item in validations}

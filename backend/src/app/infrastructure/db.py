@@ -189,3 +189,14 @@ def get_source_file_version(project_id: str, source_file_version_id: str) -> dic
     if row is None:
         return None
     return {key: row[key] for key in row.keys()}
+
+
+def get_latest_processing_job(project_id: str, source_file_version_id: str, job_type: str) -> dict[str, Any] | None:
+    with connect() as connection:
+        row = connection.execute(
+            """SELECT job_id FROM processing_jobs
+            WHERE project_id = ? AND source_file_version_id = ? AND job_type = ?
+            ORDER BY created_at DESC LIMIT 1""",
+            (project_id, source_file_version_id, job_type),
+        ).fetchone()
+    return get_processing_job(project_id, row["job_id"]) if row else None
