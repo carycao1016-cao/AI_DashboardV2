@@ -1305,6 +1305,8 @@ Wave is not always a project-level or file-level attribute. A source file may co
 
 `file_level` is valid only when the file metadata or surrounding source context applies to every physical table. `table_header` is used when the Wave is present in a table Header. `mixed` means both levels occur and table-level bindings take precedence. `unknown` remains unresolved and must not be silently converted into a project Wave or used for strict variant linking/publication.
 
+A Project may contain multiple `SourceFileVersion` objects and append a new Wave without replacing an earlier Wave. `replaces_source_file_version_id` is reserved for a corrected version of the same logical dataset; a genuinely new Wave receives its own dataset/version binding.
+
 ---
 
 ## 22. Dimension and Banner Model

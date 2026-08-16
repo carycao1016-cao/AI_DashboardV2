@@ -39,6 +39,14 @@ type TableRow = {
   source: string;
 };
 
+type FileVersion = {
+  id: string;
+  fileName: string;
+  market: string;
+  wave: string;
+  status: Status;
+};
+
 const tableRows: TableRow[] = [
   { label: "男", total: "43.9%", male: "100.0%", maleSig: "C", female: "0.0%", femaleSig: "", source: "D17" },
   { label: "女", total: "56.1%", male: "0.0%", maleSig: "", female: "100.0%", femaleSig: "B", source: "D18" },
@@ -50,6 +58,11 @@ const sheets = [
   { name: "ban1_%Sig", family: "Quantum", tables: 3, status: "已验证" as Status, range: "A2:AB77" },
   { name: "ban2_%Sig", family: "Quantum", tables: 3, status: "需 Review" as Status, range: "A80:AB609" },
   { name: "Index", family: "Decipher", tables: 0, status: "已验证" as Status, range: "not_a_table" },
+];
+
+const initialFileVersions: FileVersion[] = [
+  { id: "sfv_002", fileName: "Market_Pulse_US_Wave1.xlsx", market: "US", wave: "Wave 1", status: "已验证" },
+  { id: "sfv_001", fileName: "Market_Pulse_US_Wave1_original.xlsx", market: "US", wave: "Wave 1", status: "已验证" },
 ];
 
 const workflow = [
@@ -79,6 +92,7 @@ export function App() {
   const [waveScope, setWaveScope] = useState("Wave 1");
   const [uploadMarket, setUploadMarket] = useState("Global（总体）");
   const [uploadWave, setUploadWave] = useState("自动识别（可能在表头）");
+  const [fileVersions, setFileVersions] = useState<FileVersion[]>(initialFileVersions);
 
   const createProject = () => {
     const nextName = draftProjectName.trim();
@@ -88,6 +102,23 @@ export function App() {
     setWaveScope("波次未设置");
     setShowProjectCreate(false);
     setDraftProjectName("");
+  };
+
+  const completeUpload = () => {
+    const nextNumber = fileVersions.length + 1;
+    setMarketScope(uploadMarket);
+    setWaveScope(uploadWave.replace("文件级 ", ""));
+    setFileVersions((current) => [
+      {
+        id: `sfv_${String(nextNumber).padStart(3, "0")}`,
+        fileName: `uploaded_version_${nextNumber}.xlsx`,
+        market: uploadMarket,
+        wave: uploadWave.replace("文件级 ", ""),
+        status: "处理中",
+      },
+      ...current,
+    ]);
+    setShowUpload(false);
   };
 
   const filteredSheets = useMemo(
@@ -143,6 +174,11 @@ export function App() {
 
           <section className="notice-strip"><div className="notice-icon"><AlertTriangle size={17} /></div><div><strong>发布暂不可用</strong><span>还有 3 个问题需要处理。可以继续浏览已验证的表格。</span></div><button className="text-button">打开 Review Summary <ArrowUpRight size={14} /></button></section>
 
+          <section className="workspace-card versions-card">
+            <div className="card-heading"><div><div className="section-kicker">SOURCE FILE VERSIONS</div><h2>文件与版本</h2><p>同一个项目可以追加不同 Wave；修正版单独记录并保留替换关系。</p></div><button className="button secondary" onClick={() => setShowUpload(true)}><Plus size={15} />追加文件</button></div>
+            <div className="version-list">{fileVersions.map((version, index) => <div className="version-row" key={version.id}><span className="version-number">{index === 0 ? "当前" : version.id.replace("sfv_", "v")}</span><div className="version-file"><FileSpreadsheet size={15} /><strong>{version.fileName}</strong></div><span>{version.market}</span><span>{version.wave}</span><StatusBadge status={version.status} /><button className="icon-button" title="版本详情"><ArrowUpRight size={15} /></button></div>)}</div>
+          </section>
+
           <section className="content-grid">
             <div className="workspace-card source-card">
               <div className="card-heading"><div><div className="section-kicker">SOURCE INVENTORY</div><h2>Sheet 与物理表</h2><p>按 Sheet 保存源位置；空 Sheet 或 Index 不会被强行识别为表。</p></div><button className="icon-button" title="更多筛选"><Filter size={17} /></button></div>
@@ -170,7 +206,7 @@ export function App() {
       <button className={`assistant-capsule ${assistantOpen ? "is-open" : ""}`} onClick={() => setAssistantOpen(true)} aria-label="打开 AI 助手"><Sparkles size={16} /><span>AI 助手</span><i /></button>
       {assistantOpen && <aside className="assistant-drawer" aria-label="AI 助手"><div className="assistant-header"><div><span className="section-kicker">CREATOR AI ASSISTANT</span><h2>解析助手</h2></div><button className="icon-button dark" onClick={() => setAssistantOpen(false)} title="关闭 AI 助手"><X size={18} /></button></div><div className="assistant-body"><div className="assistant-status"><span className="pulse" /><div><strong>当前上下文</strong><span>{projectName} · {selectedSheet}</span></div></div><div className="message assistant-message"><div className="message-label"><Sparkles size={14} />AI 助手</div><p>我可以解释当前表格的结构、来源位置和显著性映射。任何修改都会先展示预览，不会直接写回源文件。</p><div className="suggestion-list"><button>解释这个表的 Header</button><button>查看显著性来源</button><button>为什么这个 Sheet 需要 Review？</button></div></div><div className="message system-message"><span className="message-label"><ShieldCheck size={14} />解析边界</span><p>当前页面展示的是已通过 Python 回读校验的结果。模型不参与数值生成。</p></div></div><div className="assistant-composer"><label htmlFor="assistant-input">向解析助手提问</label><div className="composer-box"><input id="assistant-input" placeholder="例如：这个 C 标记对应哪个表头？" /><button className="send-button" title="发送"><ArrowUpRight size={17} /></button></div><span>仅限当前项目上下文 · 不会自动修改数据</span></div></aside>}
 
-      {showUpload && <div className="modal-backdrop" role="presentation"><div className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="upload-title"><div className="modal-topline" /><div className="modal-heading"><div><span className="section-kicker">SOURCE FILE VERSION</span><h2 id="upload-title">上传新版本</h2><p>市场和 Wave 属于文件版本，也可能只存在于某张表的 Header。</p></div><button className="icon-button" onClick={() => setShowUpload(false)} title="关闭"><X size={18} /></button></div><div className="drop-zone"><Upload size={24} /><strong>拖入 Excel 或 CSV 文件</strong><span>本地演示模式：文件不会上传到服务器</span><button className="button secondary"><FolderOpen size={15} />选择文件</button></div><div className="form-grid upload-context-grid"><label>文件市场范围<select value={uploadMarket} onChange={(event) => setUploadMarket(event.target.value)}><option>Global（总体）</option><option>多市场</option><option>US</option><option>CN</option><option>UK</option></select></label><label>Wave 来源<select value={uploadWave} onChange={(event) => setUploadWave(event.target.value)}><option>自动识别（可能在表头）</option><option>文件级 Wave 1</option><option>文件级 Wave 2</option><option>文件级 Tracking</option><option>每张表可能不同</option></select></label></div><div className="upload-hint"><BookOpen size={14} /><span>选择“自动识别”时，Python 会先读取表头和表内上下文；不能确认的表会保留为待 Review，不会强行继承文件 Wave。</span></div><div className="modal-foot"><span><ShieldCheck size={14} />服务端将负责 MIME、扩展名和工作簿结构校验</span><button className="button primary" onClick={() => { setMarketScope(uploadMarket); setWaveScope(uploadWave.replace("文件级 ", "")); setShowUpload(false); }}>完成</button></div></div></div>}
+      {showUpload && <div className="modal-backdrop" role="presentation"><div className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="upload-title"><div className="modal-topline" /><div className="modal-heading"><div><span className="section-kicker">SOURCE FILE VERSION</span><h2 id="upload-title">上传新版本</h2><p>市场和 Wave 属于文件版本，也可能只存在于某张表的 Header。</p></div><button className="icon-button" onClick={() => setShowUpload(false)} title="关闭"><X size={18} /></button></div><div className="drop-zone"><Upload size={24} /><strong>拖入 Excel 或 CSV 文件</strong><span>本地演示模式：文件不会上传到服务器</span><button className="button secondary"><FolderOpen size={15} />选择文件</button></div><div className="form-grid upload-context-grid"><label>文件市场范围<select value={uploadMarket} onChange={(event) => setUploadMarket(event.target.value)}><option>Global（总体）</option><option>多市场</option><option>US</option><option>CN</option><option>UK</option></select></label><label>Wave 来源<select value={uploadWave} onChange={(event) => setUploadWave(event.target.value)}><option>自动识别（可能在表头）</option><option>文件级 Wave 1</option><option>文件级 Wave 2</option><option>文件级 Tracking</option><option>每张表可能不同</option></select></label></div><div className="upload-hint"><BookOpen size={14} /><span>选择“自动识别”时，Python 会先读取表头和表内上下文；不能确认的表会保留为待 Review，不会强行继承文件 Wave。</span></div><div className="modal-foot"><span><ShieldCheck size={14} />服务端将负责 MIME、扩展名和工作簿结构校验</span><button className="button primary" onClick={completeUpload}>完成</button></div></div></div>}
       {showProjectCreate && <div className="modal-backdrop" role="presentation"><div className="project-modal" role="dialog" aria-modal="true" aria-labelledby="project-title"><div className="modal-topline" /><div className="modal-heading"><div><span className="section-kicker">PROJECT SETUP</span><h2 id="project-title">新建项目</h2><p>项目只保存研究上下文。市场范围和 Wave 可在文件版本或表头中识别。</p></div><button className="icon-button" onClick={() => setShowProjectCreate(false)} title="关闭"><X size={18} /></button></div><div className="form-grid"><label>项目名称<input value={draftProjectName} onChange={(event) => setDraftProjectName(event.target.value)} placeholder="例如：Brand Tracker" autoFocus /></label></div><div className="modal-foot"><span><ShieldCheck size={14} />创建后可上传多个市场和多个 Wave 的文件版本</span><div className="modal-actions"><button className="button secondary" onClick={() => setShowProjectCreate(false)}>取消</button><button className="button primary" onClick={createProject} disabled={!draftProjectName.trim()}><Plus size={15} />创建项目</button></div></div></div></div>}
     </div>
   );

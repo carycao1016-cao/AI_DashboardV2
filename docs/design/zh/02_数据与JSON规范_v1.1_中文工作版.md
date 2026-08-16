@@ -171,6 +171,8 @@ Wave 不一定是项目级或文件级属性。一个源文件可能只在某张
 
 `file_level` 只有在文件元数据或周边源信息明确适用于所有物理表时才有效；`table_header` 表示 Wave 来自某张表的表头；`mixed` 表示文件级和表级来源同时存在，此时以表级绑定为准；`unknown` 表示尚未确认，不能静默转成项目 Wave，也不能用于严格变体链接或发布。
 
+同一个项目可以包含多个 `SourceFileVersion`，也可以追加新的 Wave，而不替换旧 Wave。`replaces_source_file_version_id` 只用于同一逻辑数据集的修正版；真正的新 Wave 应建立自己的数据集/版本绑定。
+
 ## 7. Source Lineage
 
 ```json

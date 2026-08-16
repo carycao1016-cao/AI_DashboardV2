@@ -854,6 +854,8 @@ Project creation must not require a single Market or Wave. These values belong t
 
 When `table_header`, `mixed` or `unknown` is selected, the UI must explain that Python will inspect table Headers and unresolved tables remain visible in Review. The UI must not imply that a file-level Wave is inherited by every table.
 
+The Project workflow must allow multiple uploaded file versions. Adding a genuinely new Wave appends a version or dataset; replacing a corrected file for the same logical Wave must preserve the old version and record an explicit replacement relationship.
+
 ---
 
 ## 19. Review Summary Components
