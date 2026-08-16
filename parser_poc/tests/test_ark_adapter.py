@@ -1,11 +1,12 @@
 import json
 import os
+import socket
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from parser_poc.ark_adapter import ArkConnectionConfig, ArkResponseError, ArkStructuredAdapter, load_local_ark_environment
+from parser_poc.ark_adapter import ArkConnectionConfig, ArkRequestError, ArkResponseError, ArkStructuredAdapter, load_local_ark_environment
 from parser_poc.contracts import SheetOutlineResponse
 
 
@@ -67,6 +68,18 @@ class ArkStructuredAdapterTests(unittest.TestCase):
             with patch.dict(os.environ, {"ARK_DEEPSEEK_MODEL": "ep-process"}, clear=False):
                 config = ArkConnectionConfig.from_environment("deepseek", env_file=path)
         self.assertEqual(config.model, "ep-process")
+
+    def test_socket_timeout_is_reported_as_request_error(self):
+        def timeout_transport(_request, _timeout):
+            raise socket.timeout("read operation timed out")
+
+        adapter = ArkStructuredAdapter(
+            profile="deepseek",
+            config=ArkConnectionConfig(api_key="test-secret", model="ep-test"),
+            transport=timeout_transport,
+        )
+        with self.assertRaises(ArkRequestError):
+            adapter.generate_structured(task_name="sheet_outline", payload={}, output_model=SheetOutlineResponse)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -168,7 +169,7 @@ class ArkStructuredAdapter:
             raise ArkRequestError("Ark HTTP request failed with status %s" % exc.code) from exc
         except URLError as exc:
             raise ArkRequestError("Ark network request failed") from exc
-        except TimeoutError as exc:
+        except (TimeoutError, socket.timeout) as exc:
             raise ArkRequestError("Ark request timed out") from exc
         try:
             decoded = json.loads(raw_response.decode("utf-8"))
