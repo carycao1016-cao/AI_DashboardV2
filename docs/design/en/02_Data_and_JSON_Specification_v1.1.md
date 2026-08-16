@@ -1283,6 +1283,28 @@ Creator-confirmed project rule
 
 If a user says `Current means Wave 2`, the conversation opens a structured review. The confirmed relationship is stored in `known_labels` and the Recognition Decision log.
 
+### 21.4 Wave scope and source of truth
+
+Wave is not always a project-level or file-level attribute. A source file may contain a Wave label in a table Header, and different physical tables in one workbook may represent different Waves. Persist the scope and provenance explicitly instead of inheriting one Wave across the workbook:
+
+```json
+{
+  "wave_scope_type": "file_level | table_header | mixed | unknown",
+  "file_wave_id": null,
+  "detected_wave_labels": ["W1", "Current"],
+  "table_wave_bindings": [
+    {
+      "extracted_table_id": "tbl_s1",
+      "wave_id": "wave_1",
+      "source_cells": ["B10", "D10"],
+      "recognition_status": "auto_approved"
+    }
+  ]
+}
+```
+
+`file_level` is valid only when the file metadata or surrounding source context applies to every physical table. `table_header` is used when the Wave is present in a table Header. `mixed` means both levels occur and table-level bindings take precedence. `unknown` remains unresolved and must not be silently converted into a project Wave or used for strict variant linking/publication.
+
 ---
 
 ## 22. Dimension and Banner Model

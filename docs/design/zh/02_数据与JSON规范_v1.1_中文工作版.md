@@ -149,6 +149,28 @@ Base 只从当前物理表明确提取；缺失 Base 为空，不继承、不显
 
 同一物理表中明确交替出现 Count/Percentage 时，使用 `combined`，但保持独立的 metric block 和来源坐标。
 
+### 6.1 Wave 来源与范围
+
+Wave 不一定是项目级或文件级属性。一个源文件可能只在某张表的表头中出现 Wave，甚至同一个工作簿中的不同物理表可能属于不同 Wave。必须保存范围类型和来源，不能把一个文件 Wave 静默继承给整个工作簿：
+
+```json
+{
+  "wave_scope_type": "file_level | table_header | mixed | unknown",
+  "file_wave_id": null,
+  "detected_wave_labels": ["W1", "Current"],
+  "table_wave_bindings": [
+    {
+      "extracted_table_id": "tbl_s1",
+      "wave_id": "wave_1",
+      "source_cells": ["B10", "D10"],
+      "recognition_status": "auto_approved"
+    }
+  ]
+}
+```
+
+`file_level` 只有在文件元数据或周边源信息明确适用于所有物理表时才有效；`table_header` 表示 Wave 来自某张表的表头；`mixed` 表示文件级和表级来源同时存在，此时以表级绑定为准；`unknown` 表示尚未确认，不能静默转成项目 Wave，也不能用于严格变体链接或发布。
+
 ## 7. Source Lineage
 
 ```json

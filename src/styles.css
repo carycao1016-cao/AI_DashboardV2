@@ -213,6 +213,8 @@ h2 { margin-top: 5px; font-size: 18px; letter-spacing: -.01em; }
 .form-grid input:focus, .form-grid select:focus { border-color: #bb8f00; box-shadow: 0 0 0 3px rgba(252,197,59,.2); }
 .upload-context-grid { margin-top: 16px; }
 .upload-context-grid label:first-child { grid-column: auto; }
+.upload-hint { display: flex; align-items: flex-start; gap: 7px; margin-top: 12px; padding: 9px 10px; color: var(--color-info-text); background: var(--color-info-bg); border: 1px solid #dbe3eb; border-radius: var(--radius-xs); font-size: 10px; line-height: 1.5; }
+.upload-hint svg { flex-shrink: 0; margin-top: 1px; }
 .modal-actions { display: flex; gap: 8px; }
 .modal-topline { position: absolute; top: 0; right: 0; left: 0; height: 4px; background: var(--color-ai-accent); border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
 .modal-heading { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 22px; }

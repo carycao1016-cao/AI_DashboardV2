@@ -843,6 +843,17 @@ interface UploadItem {
 - Server validates MIME, extension and workbook structure.
 - Do not expose storage URIs.
 
+### 18.4 Market and Wave scope
+
+Project creation must not require a single Market or Wave. These values belong to an uploaded file version or to an individual extracted table. The upload flow must support:
+
+- `Global` as an already-aggregated overall file.
+- `multi_market` when one file contains several markets.
+- A single market when the file is explicitly scoped.
+- Wave source options `file_level`, `table_header`, `mixed` and `unknown`.
+
+When `table_header`, `mixed` or `unknown` is selected, the UI must explain that Python will inspect table Headers and unresolved tables remain visible in Review. The UI must not imply that a file-level Wave is inherited by every table.
+
 ---
 
 ## 19. Review Summary Components
