@@ -10,10 +10,10 @@ import re
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, status
 
-from parser_poc.workbook_scan import scan_workbook
-from ..infrastructure.db import add_source_file_version, get_project
+from ..infrastructure.db import add_source_file_version, create_processing_job, get_processing_job, get_project
+from ..pipelines.ingestion import run_workbook_scan
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -31,9 +31,10 @@ def _safe_filename(name: str) -> str:
     return cleaned or "upload.xlsx"
 
 
-@router.post("/{project_id}/source-versions")
+@router.post("/{project_id}/source-versions", status_code=status.HTTP_202_ACCEPTED)
 async def create_source_version(
     project_id: str,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     market_scope: str = Form("auto"),
     wave_scope: str = Form("auto"),
@@ -59,22 +60,6 @@ async def create_source_version(
         raise HTTPException(status_code=400, detail="文件不能为空")
     target_path.write_bytes(content)
 
-    try:
-        summary = scan_workbook(target_path)
-    except Exception as exc:
-        target_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=422, detail=f"Workbook 扫描失败：{exc}") from exc
-
-    sheets = [
-        {
-            "sheet_name": sheet.get("sheet_name"),
-            "scan_range": sheet.get("scan_range"),
-            "outline_chunk_count": len(sheet.get("outline_chunks", [])),
-            "estimated_input_tokens": sheet.get("estimated_input_tokens"),
-        }
-        for sheet in summary.get("sheets", [])
-    ]
-    scan_summary = {"sheet_count": len(sheets), "sheets": sheets}
     add_source_file_version(
         project_id,
         {
@@ -85,10 +70,13 @@ async def create_source_version(
             "wave_scope": wave_scope,
             "upload_mode": upload_mode,
             "replaces_source_file_version_id": replaces_source_file_version_id,
-            "scan_status": "completed",
-            "scan_summary": scan_summary,
+            "scan_status": "queued",
+            "scan_summary": {},
         },
     )
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    create_processing_job(job_id, project_id, version_id)
+    background_tasks.add_task(run_workbook_scan, job_id, version_id, str(target_path))
     return {
         "success": True,
         "data": {
@@ -99,8 +87,15 @@ async def create_source_version(
             "wave_scope": wave_scope,
             "upload_mode": upload_mode,
             "replaces_source_file_version_id": replaces_source_file_version_id,
-            "sheet_count": len(sheets),
-            "sheets": sheets,
-            "scan_status": "completed",
+            "job_id": job_id,
+            "scan_status": "queued",
         },
     }
+
+
+@router.get("/{project_id}/jobs/{job_id}")
+def get_job(project_id: str, job_id: str) -> dict[str, object]:
+    job = get_processing_job(project_id, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="处理任务不存在")
+    return {"success": True, "data": job}
