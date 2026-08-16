@@ -29,6 +29,7 @@ Use one or more `--detail-range start:end` arguments with `--sheet` to build sec
 - `orchestration.py` contains a provider-neutral adapter protocol and `ControlledStubAdapter`. The Stub returns only explicitly supplied fixtures; it does not infer a table or call a model.
 - `golden_evaluation.py` reads structural fields from `Golden_Annotation_Final.xlsx` and emits aggregate coverage and validation statuses without question text, labels or numeric values.
 - `golden_scan_evaluation.py` scans every source file registered in the final Golden workbook and records Layer 1 Outline coverage. It does not treat an Outline chunk as an AI table-boundary result.
+- `ark_adapter.py` is the provider boundary for Volcengine Ark. It supports separately configured `deepseek` and `doubao` profiles without embedding API keys or endpoint IDs in Parser code; see `ARK_SETUP.md`.
 
 The orchestrator currently validates physical bounds and declared region overlap only. It is intentionally not a value extractor, a significance mapper or a production acceptance engine.
 
