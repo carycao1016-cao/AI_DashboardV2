@@ -236,6 +236,7 @@ h2 { margin-top: 5px; font-size: 18px; letter-spacing: -.01em; }
 .upload-hint { display: flex; align-items: flex-start; gap: 7px; margin-top: 12px; padding: 9px 10px; color: var(--color-info-text); background: var(--color-info-bg); border: 1px solid #dbe3eb; border-radius: var(--radius-xs); font-size: 10px; line-height: 1.5; }
 .upload-hint svg { flex-shrink: 0; margin-top: 1px; }
 .upload-error { display: flex; align-items: center; gap: 6px; margin-top: 12px; padding: 9px 10px; color: var(--color-warning-text); background: var(--color-warning-bg); border: 1px solid #f2d99c; border-radius: var(--radius-xs); font-size: 11px; }
+.page-error { margin: 0 0 14px; }
 .processing-card { max-width: 760px; }
 .processing-card h2 { margin-bottom: 8px; }
 .processing-card p { color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; }

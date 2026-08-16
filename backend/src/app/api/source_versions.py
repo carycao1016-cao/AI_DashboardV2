@@ -12,8 +12,10 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, status
 
-from ..infrastructure.db import add_source_file_version, create_processing_job, get_processing_job, get_project
+from ..infrastructure.db import add_source_file_version, create_processing_job, get_processing_job, get_project, get_source_file_version
 from ..pipelines.ingestion import run_workbook_scan
+from ..pipelines.recognition import run_ai_recognition
+from ..settings import AI_ENABLED
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -75,7 +77,7 @@ async def create_source_version(
         },
     )
     job_id = f"job_{uuid.uuid4().hex[:12]}"
-    create_processing_job(job_id, project_id, version_id)
+    create_processing_job(job_id, project_id, version_id, "ingestion")
     background_tasks.add_task(run_workbook_scan, job_id, version_id, str(target_path))
     return {
         "success": True,
@@ -99,3 +101,23 @@ def get_job(project_id: str, job_id: str) -> dict[str, object]:
     if job is None:
         raise HTTPException(status_code=404, detail="处理任务不存在")
     return {"success": True, "data": job}
+
+
+@router.post("/{project_id}/source-versions/{source_file_version_id}/recognition", status_code=status.HTTP_202_ACCEPTED)
+def start_recognition(
+    project_id: str,
+    source_file_version_id: str,
+    background_tasks: BackgroundTasks,
+) -> dict[str, object]:
+    """显式启动 AI 两层识别；上传不会自动触发 Provider 请求。"""
+    if not AI_ENABLED:
+        raise HTTPException(status_code=409, detail="AI 识别当前已关闭，请在后端配置 PARSER_AI_ENABLED=true")
+    version = get_source_file_version(project_id, source_file_version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="文件版本不存在")
+    if version["scan_status"] != "completed":
+        raise HTTPException(status_code=409, detail="Python Workbook 扫描尚未完成")
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    create_processing_job(job_id, project_id, source_file_version_id, "recognition")
+    background_tasks.add_task(run_ai_recognition, job_id, version["storage_path"])
+    return {"success": True, "data": {"job_id": job_id, "source_file_version_id": source_file_version_id, "status": "queued"}}

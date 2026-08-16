@@ -213,6 +213,26 @@ export function App() {
     setProjectError("识别任务仍在后台处理，请稍后查看识别进度");
   };
 
+  const startRecognition = async () => {
+    const version = fileVersions.find((item) => item.status === "已扫描");
+    if (!version) {
+      setProjectError("没有可开始识别的已扫描文件版本");
+      return;
+    }
+    setProjectError("");
+    try {
+      const response = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${projectId}/source-versions/${version.id}/recognition`, { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.detail || "启动 AI 识别失败");
+      const job = payload.data as { job_id: string; source_file_version_id: string };
+      setProcessingJob({ job_id: job.job_id, source_file_version_id: job.source_file_version_id, status: "queued", phase: "等待 AI 识别", progress_percent: 0, error_message: null });
+      setActiveView("processing");
+      void pollProcessingJob(projectId, job.job_id).catch((error: Error) => setProjectError(error.message));
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : "启动 AI 识别失败");
+    }
+  };
+
   const completeUpload = async () => {
     if (!selectedFile) return;
     const isReplacement = uploadMode === "replace";
@@ -300,8 +320,9 @@ export function App() {
           {activeView === "overview" ? <>
           <section className="page-header">
             <div><div className="eyebrow">CREATOR WORKSPACE · {projectName.toUpperCase()} / {marketScope.toUpperCase()} / {waveScope.toUpperCase()}</div><h1>项目概览</h1><p>查看上传版本、表格识别状态和当前需要处理的结构问题。</p></div>
-            <div className="page-actions"><button className="button secondary" onClick={() => setShowUpload(true)}><Upload size={16} />上传新版本</button><button className="button primary"><Sparkles size={16} />开始识别</button></div>
+            <div className="page-actions"><button className="button secondary" onClick={() => setShowUpload(true)}><Upload size={16} />上传新版本</button><button className="button primary" onClick={startRecognition}><Sparkles size={16} />开始识别</button></div>
           </section>
+          {projectError && <div className="upload-error page-error"><AlertTriangle size={14} />{projectError}</div>}
 
           <section className="summary-grid" aria-label="项目摘要">
             <SummaryCard label="识别进度" value="86%" meta="23 / 27 张物理表" icon={<Gauge size={18} />} tone="yellow" />

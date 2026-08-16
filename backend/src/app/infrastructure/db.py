@@ -46,6 +46,7 @@ def connect() -> sqlite3.Connection:
             job_id TEXT PRIMARY KEY,
             project_id TEXT NOT NULL REFERENCES projects(project_id),
             source_file_version_id TEXT NOT NULL REFERENCES source_file_versions(source_file_version_id),
+            job_type TEXT NOT NULL DEFAULT 'ingestion',
             status TEXT NOT NULL,
             phase TEXT NOT NULL,
             progress_percent INTEGER NOT NULL,
@@ -55,6 +56,12 @@ def connect() -> sqlite3.Connection:
         );
         """
     )
+    # 兼容上一轮已创建的本地 SQLite 文件；正式环境由迁移工具管理。
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(processing_jobs)")}
+    if "job_type" not in columns:
+        connection.execute("ALTER TABLE processing_jobs ADD COLUMN job_type TEXT NOT NULL DEFAULT 'ingestion'")
+    if "result_json" not in columns:
+        connection.execute("ALTER TABLE processing_jobs ADD COLUMN result_json TEXT NOT NULL DEFAULT '{}' ")
     return connection
 
 
@@ -112,13 +119,13 @@ def add_source_file_version(project_id: str, version: dict[str, Any]) -> None:
         )
 
 
-def create_processing_job(job_id: str, project_id: str, source_file_version_id: str) -> None:
+def create_processing_job(job_id: str, project_id: str, source_file_version_id: str, job_type: str = "ingestion") -> None:
     with connect() as connection:
         connection.execute(
             """INSERT INTO processing_jobs(
-                job_id, project_id, source_file_version_id, status, phase, progress_percent
-            ) VALUES (?, ?, ?, 'queued', '等待 Workbook 扫描', 0)""",
-            (job_id, project_id, source_file_version_id),
+                job_id, project_id, source_file_version_id, job_type, status, phase, progress_percent
+            ) VALUES (?, ?, ?, ?, 'queued', '等待处理', 0)""",
+            (job_id, project_id, source_file_version_id, job_type),
         )
 
 
@@ -129,13 +136,14 @@ def update_processing_job(
     phase: str,
     progress_percent: int,
     error_message: str | None = None,
+    result: dict[str, Any] | None = None,
 ) -> None:
     with connect() as connection:
         connection.execute(
             """UPDATE processing_jobs
-            SET status = ?, phase = ?, progress_percent = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP
+            SET status = ?, phase = ?, progress_percent = ?, error_message = ?, result_json = COALESCE(?, result_json), updated_at = CURRENT_TIMESTAMP
             WHERE job_id = ?""",
-            (status, phase, progress_percent, error_message, job_id),
+            (status, phase, progress_percent, error_message, json.dumps(result, ensure_ascii=False) if result is not None else None, job_id),
         )
 
 
@@ -161,10 +169,23 @@ def get_processing_job(project_id: str, job_id: str) -> dict[str, Any] | None:
         "job_id": row["job_id"],
         "project_id": row["project_id"],
         "source_file_version_id": row["source_file_version_id"],
+        "job_type": row["job_type"],
         "status": row["status"],
         "phase": row["phase"],
         "progress_percent": row["progress_percent"],
         "error_message": row["error_message"],
+        "result": json.loads(row["result_json"]),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+def get_source_file_version(project_id: str, source_file_version_id: str) -> dict[str, Any] | None:
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM source_file_versions WHERE project_id = ? AND source_file_version_id = ?",
+            (project_id, source_file_version_id),
+        ).fetchone()
+    if row is None:
+        return None
+    return {key: row[key] for key in row.keys()}
