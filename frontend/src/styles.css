@@ -243,6 +243,11 @@ h2 { margin-top: 5px; font-size: 18px; letter-spacing: -.01em; }
 .processing-progress { height: 8px; margin-top: 22px; overflow: hidden; background: #ecece8; border-radius: 4px; }
 .processing-progress div { height: 100%; background: var(--color-accent); transition: width .25s ease; }
 .processing-meta { display: flex; justify-content: space-between; margin-top: 8px; color: var(--color-text-secondary); font-size: 11px; }
+.recognition-detail-card { max-width: 900px; }
+.recognition-detail-card h2 { margin-bottom: 14px; }
+.proposal-row { display: grid; grid-template-columns: minmax(100px, 1.1fr) repeat(5, 1fr); gap: 10px; padding: 12px 0; border-top: 1px solid #e3e4e0; color: var(--color-text-secondary); font-size: 11px; }
+.proposal-row strong { color: var(--color-text-primary); font-family: var(--font-mono); }
+@media (max-width: 760px) { .proposal-row { grid-template-columns: 1fr 1fr; } }
 .replace-select { display: flex; flex-direction: column; gap: 7px; margin-top: 16px; color: var(--color-text-secondary); font-size: 11px; font-weight: 700; }
 .replace-select select { height: 38px; padding: 0 10px; color: var(--color-text-primary); background: #fafafa; border: 1px solid #cfd3d8; border-radius: var(--radius-sm); font-size: 12px; }
 .optional-hint { display: flex; flex-direction: column; gap: 7px; margin-top: 14px; color: var(--color-text-secondary); font-size: 11px; font-weight: 700; }
