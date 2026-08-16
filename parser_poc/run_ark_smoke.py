@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from parser_poc.ark_adapter import ArkStructuredAdapter
+from parser_poc.extraction import extract_validated_table
 from parser_poc.orchestration import run_xlsx_sheet_with_adapter
 
 
@@ -19,6 +20,12 @@ def main() -> None:
         default=Path(__file__).parents[1] / "outputs/ark_smoke/Tabs_%95_first_table.xlsx",
     )
     parser.add_argument("--sheet", default="ban1_%Sig")
+    parser.add_argument(
+        "--metric-type",
+        choices=("unknown", "count", "percentage"),
+        default="unknown",
+        help="传给 Python 提取层的表格指标类型；unknown 不强行推断单位",
+    )
     parser.add_argument("--expected-range", default="A1:AB78")
     parser.add_argument("--expect-not-a-table", action="store_true")
     parser.add_argument(
@@ -26,6 +33,7 @@ def main() -> None:
         type=Path,
         default=Path(__file__).parents[1] / "outputs/ark_smoke/deepseek_two_layer_results.json",
     )
+    parser.add_argument("--extracted-output", type=Path, help="可选：保存 Python 回读的业务值 JSON，不写入评估状态报告")
     args = parser.parse_args()
 
     adapter = ArkStructuredAdapter.from_environment(args.profile)
@@ -35,6 +43,7 @@ def main() -> None:
         adapter=adapter,
     )
     proposals = []
+    extracted_tables = []
     validation_index = 0
     for response in details:
         for proposal in response.proposals:
@@ -49,6 +58,16 @@ def main() -> None:
                     "exact_range_match": proposal.source_range == args.expected_range,
                 }
             )
+            if args.extracted_output and validation.outcome.value in {"accepted", "adjusted"}:
+                extracted_tables.append(
+                    extract_validated_table(
+                        path=args.input,
+                        proposal=proposal,
+                        validation=validation,
+                        extracted_table_id="%s_%02d" % (args.profile, len(extracted_tables) + 1),
+                        metric_type=args.metric_type,
+                    )
+                )
     report = {
         "schema_name": "ark_two_layer_smoke_report",
         "profile": args.profile,
@@ -65,6 +84,9 @@ def main() -> None:
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    if args.extracted_output:
+        args.extracted_output.parent.mkdir(parents=True, exist_ok=True)
+        args.extracted_output.write_text(json.dumps(extracted_tables, ensure_ascii=False, indent=2), encoding="utf-8")
     print("已写入 %s" % args.output)
 
 

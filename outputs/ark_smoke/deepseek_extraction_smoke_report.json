@@ -1,0 +1,35 @@
+{
+  "schema_name": "ark_two_layer_smoke_report",
+  "profile": "deepseek",
+  "source_file": "Tabs_%95_first_table.xlsx",
+  "sheet_name": "ban1_%Sig",
+  "expected_golden_table_range": "A2:AB77",
+  "expected_not_a_table": false,
+  "outline_candidate_count": 1,
+  "detail_window_count": 1,
+  "proposals": [
+    {
+      "source_range": "A1:AB78",
+      "candidate_id": "cand_001",
+      "validation_outcome": "accepted",
+      "validation_categories": [],
+      "exact_range_match": false
+    }
+  ],
+  "call_records": [
+    {
+      "task_name": "sheet_outline",
+      "profile": "deepseek",
+      "attempt": 1,
+      "outcome": "accepted"
+    },
+    {
+      "task_name": "detail_window",
+      "profile": "deepseek",
+      "attempt": 1,
+      "outcome": "accepted"
+    }
+  ],
+  "not_a_table_false_positive": false,
+  "interpretation": "物理范围校验通过不等于 Golden 完整边界正确；仅 exact_range_match=true 才表示本 Smoke 的完整范围匹配。"
+}

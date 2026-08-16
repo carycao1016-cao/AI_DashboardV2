@@ -55,3 +55,24 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(dash_cell["raw_value"], "- ")
         self.assertIsNone(dash_cell["parsed_value"])
         self.assertEqual(dash_cell["availability_status"], "not_available")
+
+    def test_separate_label_row_is_read_as_following_row(self):
+        proposal = TableBoundaryProposal(
+            proposal_id="p3",
+            candidate_id="c3",
+            sheet_name="ban1_%Sig",
+            source_range="A2:AB77",
+            regions=TableRegions(
+                header_rows=[10, 11],
+                data_rows=[14],
+                significance_locations=[15],
+                significance_layout=SignificanceLayout.SEPARATE_LABEL_ROW,
+            ),
+        )
+        result = extract_validated_table(
+            path=Path(__file__).parents[2] / "PoC/Quantum Tab/Tabs_%95.xlsx",
+            proposal=proposal,
+            validation=BoundaryValidationResult(proposal_id="p3", outcome=ValidationOutcome.ACCEPTED),
+            extracted_table_id="Q03_01",
+        )
+        self.assertEqual(result["rows"][0]["cells"][0]["original_significance_marker"], "D")

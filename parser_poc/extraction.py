@@ -114,7 +114,13 @@ def extract_validated_table(
                 parsed_value, parsed_unit, precision_source = _parse_value(value_cell.value, value_cell.number_format)
                 marker = ""
                 marker_source = ""
-                if row_kind == "data" and proposal.regions.significance_layout == SignificanceLayout.FOLLOWING_ROW:
+                # Quantum 等表格把显著性代码放在数据行的下一行；模型可能将这种布局
+                # 命名为 following_row，也可能命名为 separate_label_row。两者在源表
+                # 读取层的物理含义相同，均必须按 significance_locations 严格取值。
+                if row_kind == "data" and proposal.regions.significance_layout in {
+                    SignificanceLayout.FOLLOWING_ROW,
+                    SignificanceLayout.SEPARATE_LABEL_ROW,
+                }:
                     marker_row = row_number + 1
                     if marker_row in significance_rows:
                         marker_value = value_sheet.cell(marker_row, column).value
