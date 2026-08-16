@@ -1,4 +1,4 @@
-"""本地 PoC API：接收源文件并运行 Python Workbook Outline 扫描。
+"""源文件版本 API：接收源文件并运行 Python Workbook Outline 扫描。
 
 该服务只负责文件版本登记和确定性的 Sheet 扫描，不调用 AI，也不把完整
 工作簿发送到外部 Provider。生产环境还需要认证、对象存储、任务队列和数据库。
@@ -10,24 +10,17 @@ import re
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from parser_poc.workbook_scan import scan_workbook
 
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).resolve().parents[4]
 UPLOAD_ROOT = ROOT / "outputs" / "local_uploads"
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 ALLOWED_SUFFIXES = {".xlsx", ".csv"}
 
-app = FastAPI(title="AI Dashboard Parser PoC API", version="0.1.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
+router = APIRouter(prefix="/api/projects", tags=["source-versions"])
 
 
 def _safe_filename(name: str) -> str:
@@ -37,12 +30,7 @@ def _safe_filename(name: str) -> str:
     return cleaned or "upload.xlsx"
 
 
-@app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "service": "parser_poc"}
-
-
-@app.post("/api/projects/{project_id}/source-versions")
+@router.post("/{project_id}/source-versions")
 async def create_source_version(
     project_id: str,
     file: UploadFile = File(...),

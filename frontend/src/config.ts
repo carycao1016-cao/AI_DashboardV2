@@ -8,5 +8,5 @@ export const uiConfig = {
   /** AI 助手首次进入项目时是否展开。默认关闭，优先展示项目工作区。 */
   assistantDefaultOpen: false,
   /** 本地 Python Parser API；部署时由环境配置替换。 */
-  parserApiBaseUrl: "http://127.0.0.1:8000",
+  parserApiBaseUrl: import.meta.env.VITE_PARSER_API_BASE_URL || "http://127.0.0.1:8000",
 };

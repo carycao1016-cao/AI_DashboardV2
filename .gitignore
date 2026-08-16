@@ -6,6 +6,7 @@ outputs/archive/
 outputs/local_uploads/
 outputs/golden_annotation_final/qa/
 parser_poc/.env.ark
+backend/.env
 .venv/
 *.egg-info/
 node_modules/
