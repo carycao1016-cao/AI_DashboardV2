@@ -131,8 +131,12 @@ h2 { margin-top: 5px; font-size: 18px; letter-spacing: -.01em; }
 .versions-card { margin-bottom: 16px; padding: 18px 22px; }
 .version-actions { display: flex; gap: 7px; }
 .version-list { overflow-x: auto; margin-top: 15px; border-top: 1px solid var(--color-border); }
-.version-row { min-width: 850px; min-height: 48px; display: grid; grid-template-columns: 44px minmax(220px, 1fr) 90px 150px minmax(90px, .7fr) 88px 28px; align-items: center; gap: 10px; border-bottom: 1px solid var(--color-border); font-size: 11px; }
+.version-row { width: 100%; min-width: 850px; min-height: 48px; display: grid; grid-template-columns: 44px minmax(220px, 1fr) 90px 150px minmax(90px, .7fr) 88px 28px; align-items: center; gap: 10px; padding: 0; color: inherit; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--color-border); border-radius: 0; font-size: 11px; cursor: pointer; }
 .version-row:last-child { border-bottom: 0; }
+.version-row:hover, .version-row.selected { background: var(--color-ai-callout-bg); }
+.version-open { display: grid; place-items: center; color: var(--color-text-secondary); }
+.version-context { min-height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 12px; margin-bottom: 16px; color: var(--color-text-secondary); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: 11px; }
+.version-context select { min-width: 0; flex: 1; max-width: 520px; color: var(--color-text); background: transparent; border: 0; font: inherit; }
 .version-number { color: var(--color-text-secondary); font-family: ui-monospace, monospace; font-size: 10px; }
 .version-file { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .version-file svg { flex-shrink: 0; color: #8b6710; }
@@ -171,6 +175,8 @@ h2 { margin-top: 5px; font-size: 18px; letter-spacing: -.01em; }
 .issue-row > div { display: flex; flex-direction: column; min-width: 0; }
 .issue-row strong { font-size: 12px; }
 .issue-row > div span { overflow: hidden; margin-top: 4px; color: var(--color-text-secondary); text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.review-action { display: flex !important; flex-direction: column; gap: 6px; min-width: 180px; }
+.review-action input { min-width: 180px; min-height: 30px; padding: 0 8px; color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-sm); font: inherit; }
 .issue-status { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; white-space: nowrap; }
 .issue-status.success { color: var(--color-success-text); }
 .issue-status.warning { color: var(--color-warning-text); }

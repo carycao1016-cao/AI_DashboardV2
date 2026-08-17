@@ -29,6 +29,7 @@ import { uiConfig } from "./config";
 
 type Status = "已验证" | "需 Review" | "处理中" | "已扫描";
 type WorkflowView = "overview" | "versions" | "processing" | "review" | "explorer" | "dashboard";
+type ExplorerDetail = "none" | "source" | "recognition";
 
 type TableRow = {
   label: string;
@@ -102,7 +103,7 @@ type ExtractedTable = {
   detected_question_text: string;
   detected_table_title: string;
   table_variant: string;
-  headers: Array<{ extracted_header_id: string; display_label: string; header_path: string[]; significance_code: string }>;
+  headers: Array<{ extracted_header_id: string; display_label: string; header_path: string[]; significance_code: string; source_header_cells?: string[] }>;
   rows: Array<{ extracted_row_id: string; original_label: string; detected_row_type: string; cells: ExtractedCell[] }>;
 };
 
@@ -188,11 +189,13 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bootstrapStartedRef = useRef(false);
   const [fileVersions, setFileVersions] = useState<FileVersion[]>(initialFileVersions);
+  const [selectedSourceVersionId, setSelectedSourceVersionId] = useState("");
   const [processingJob, setProcessingJob] = useState<ProcessingJob | null>(null);
   const [recognitionResult, setRecognitionResult] = useState<RecognitionResult | null>(null);
   const [extractionTables, setExtractionTables] = useState<ExtractedTable[]>([]);
   const [reviewIssues, setReviewIssues] = useState<ReviewIssue[]>([]);
   const [activeView, setActiveView] = useState<WorkflowView>("overview");
+  const [explorerDetail, setExplorerDetail] = useState<ExplorerDetail>("none");
 
   const applyProject = (project: ApiProject) => {
     setProjectId(project.project_id);
@@ -207,33 +210,36 @@ export function App() {
     })));
   };
 
-  const loadProject = async (id: string) => {
+  const loadProject = async (id: string, requestedSourceVersionId?: string) => {
     const response = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}`);
     const payload = await response.json();
     if (!response.ok || !payload.success) throw new Error(payload.detail || "读取项目失败");
     const project = payload.data as ApiProject;
     applyProject(project);
+    const selectedVersion = project.source_file_versions.find((version) => version.source_file_version_id === (requestedSourceVersionId ?? selectedSourceVersionId))
+      ?? project.source_file_versions[0];
+    setSelectedSourceVersionId(selectedVersion?.source_file_version_id || "");
     const reviewResponse = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/review-issues`);
     if (reviewResponse.ok) {
       const reviewPayload = await reviewResponse.json();
-      setReviewIssues(reviewPayload.success ? (reviewPayload.data.issues as ReviewIssue[]) : []);
+      const issues = reviewPayload.success ? (reviewPayload.data.issues as ReviewIssue[]) : [];
+      setReviewIssues(selectedVersion ? issues.filter((issue) => issue.source_file_version_id === selectedVersion.source_file_version_id) : []);
     } else {
       setReviewIssues([]);
     }
-    const completedVersion = project.source_file_versions.find((version) => version.scan_status === "completed");
-    if (!completedVersion) {
+    if (!selectedVersion || selectedVersion.scan_status !== "completed") {
       setRecognitionResult(null);
       setExtractionTables([]);
       return;
     }
-    const recognitionResponse = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/source-versions/${completedVersion.source_file_version_id}/recognition-results`);
+    const recognitionResponse = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/source-versions/${selectedVersion.source_file_version_id}/recognition-results`);
     if (!recognitionResponse.ok) {
       setRecognitionResult(null);
       return;
     }
     const recognitionPayload = await recognitionResponse.json();
     setRecognitionResult(recognitionPayload.success ? recognitionPayload.data as RecognitionResult : null);
-    const extractionResponse = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/source-versions/${completedVersion.source_file_version_id}/extraction`);
+    const extractionResponse = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/source-versions/${selectedVersion.source_file_version_id}/extraction`);
     if (!extractionResponse.ok) {
       setExtractionTables([]);
       return;
@@ -298,7 +304,7 @@ export function App() {
     setProjectMenuOpen(false);
     setProjectError("");
     try {
-      await loadProject(summary.project_id);
+      await loadProject(summary.project_id, "");
       setMarketScope("范围未设置");
       setWaveScope("波次未设置");
     } catch (error) {
@@ -306,12 +312,21 @@ export function App() {
     }
   };
 
-  const resolveReviewIssue = async (issue: ReviewIssue) => {
+  const selectSourceVersion = async (sourceVersionId: string) => {
+    setProjectError("");
+    try {
+      await loadProject(projectId, sourceVersionId);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : "读取文件版本失败");
+    }
+  };
+
+  const resolveReviewIssue = async (issue: ReviewIssue, creatorNote = "") => {
     try {
       const response = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${projectId}/review-issues/${issue.review_issue_id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "resolved" }),
+        body: JSON.stringify({ status: "resolved", creator_note: creatorNote || null }),
       });
       const payload = await response.json();
       if (!response.ok || !payload.success) throw new Error(payload.detail || "无法保存 Review 结论");
@@ -330,7 +345,7 @@ export function App() {
       if (!response.ok || !payload.success) throw new Error(payload.detail || "读取识别任务失败");
       const job = payload.data as ProcessingJob;
       setProcessingJob(job);
-      await loadProject(id);
+      await loadProject(id, job.source_file_version_id);
       if (job.status === "completed" || job.status === "failed") {
         if (job.status === "failed") setProjectError(job.error_message || "Workbook 扫描失败");
         return;
@@ -341,7 +356,7 @@ export function App() {
   };
 
   const startRecognition = async () => {
-    const version = fileVersions.find((item) => item.status === "已扫描");
+    const version = fileVersions.find((item) => item.id === selectedSourceVersionId && item.status === "已扫描");
     if (!version) {
       setProjectError("没有可开始识别的已扫描文件版本");
       return;
@@ -380,7 +395,7 @@ export function App() {
       const data = payload.data as { source_file_version_id: string; file_name: string; job_id: string };
       setMarketScope(market);
       setWaveScope(wave);
-      await loadProject(projectId);
+      await loadProject(projectId, data.source_file_version_id);
       setProcessingJob({ job_id: data.job_id, source_file_version_id: data.source_file_version_id, status: "queued", phase: "等待 Workbook 扫描", progress_percent: 0, error_message: null });
       setSelectedFile(null);
       setSelectedFileName("");
@@ -459,6 +474,7 @@ export function App() {
             <div><div className="eyebrow">CREATOR WORKSPACE · {projectName.toUpperCase()} / {marketScope.toUpperCase()} / {waveScope.toUpperCase()}</div><h1>项目概览</h1><p>查看上传版本、表格识别状态和当前需要处理的结构问题。</p></div>
             <div className="page-actions"><button className="button secondary" onClick={() => setShowUpload(true)}><Upload size={16} />上传新版本</button><button className="button primary" onClick={startRecognition}><Sparkles size={16} />开始识别</button></div>
           </section>
+          {fileVersions.length > 0 && <div className="version-context"><FileSpreadsheet size={15} /><span>当前文件版本</span><select value={selectedSourceVersionId} onChange={(event) => void selectSourceVersion(event.target.value)}>{fileVersions.map((version) => <option key={version.id} value={version.id}>{version.fileName} · {version.market} · {version.wave}</option>)}</select></div>}
           {projectError && <div className="upload-error page-error"><AlertTriangle size={14} />{projectError}</div>}
 
           <section className="summary-grid" aria-label="项目摘要">
@@ -472,7 +488,7 @@ export function App() {
 
           <section className="workspace-card versions-card">
             <div className="card-heading"><div><div className="section-kicker">SOURCE FILE VERSIONS</div><h2>文件与版本</h2><p>新增文件和修正版分开处理；历史版本始终保留。</p></div><div className="version-actions"><button className="button secondary" onClick={() => { setUploadMode("append"); setShowUpload(true); }}><Plus size={15} />追加文件</button><button className="button secondary" onClick={() => { setUploadMode("replace"); setShowUpload(true); }}><Upload size={15} />替换版本</button></div></div>
-            <div className="version-list">{fileVersions.map((version, index) => <div className="version-row" key={version.id}><span className="version-number">{index === 0 ? "当前" : version.id.replace("sfv_", "v")}</span><div className="version-file"><FileSpreadsheet size={15} /><strong>{version.fileName}</strong></div><span>{version.market}</span><span>{version.wave}</span><span className="version-relation">{version.relation}</span><StatusBadge status={version.status} /><button className="icon-button" title="版本详情"><ArrowUpRight size={15} /></button></div>)}</div>
+            <div className="version-list">{fileVersions.map((version, index) => <button type="button" className={`version-row ${version.id === selectedSourceVersionId ? "selected" : ""}`} key={version.id} onClick={() => void selectSourceVersion(version.id)}><span className="version-number">{index === 0 ? "当前" : version.id.replace("sfv_", "v")}</span><div className="version-file"><FileSpreadsheet size={15} /><strong>{version.fileName}</strong></div><span>{version.market}</span><span>{version.wave}</span><span className="version-relation">{version.relation}</span><StatusBadge status={version.status} /><span className="version-open"><ArrowUpRight size={15} /></span></button>)}</div>
           </section>
 
           <section className="content-grid">
@@ -491,10 +507,10 @@ export function App() {
           </section>
 
           <section className="workspace-card explorer-card">
-            <div className="card-heading"><div><div className="section-kicker">DATA EXPLORER · {selectedSheet.toUpperCase()}</div><h2>已验证表格预览</h2><p>展示值来自 Excel display value；解析值保留原始精度和 Source Lineage。</p></div><div className="preview-actions"><button className="button secondary"><BookOpen size={15} />原始来源</button><button className="button secondary"><PanelRight size={15} />识别详情</button></div></div>
+            <div className="card-heading"><div><div className="section-kicker">DATA EXPLORER · {selectedSheet.toUpperCase()}</div><h2>已验证表格预览</h2><p>展示值来自 Excel display value；解析值保留原始精度和 Source Lineage。</p></div><div className="preview-actions"><button className="button secondary" onClick={() => { setExplorerDetail("source"); setActiveView("explorer"); }}><BookOpen size={15} />原始来源</button><button className="button secondary" onClick={() => { setExplorerDetail("recognition"); setActiveView("explorer"); }}><PanelRight size={15} />识别详情</button></div></div>
             {extractionTables.find((table) => table.source_sheet === selectedSheet) ? <ExtractedTablePreview table={extractionTables.find((item) => item.source_sheet === selectedSheet)!} /> : projectId === "prj_market-pulse" ? <><div className="table-meta"><span className="table-title-mark" /><div><strong>S1：请问您的性别是？</strong><span>Percentages_Sig1 · A12:AW18 · percentage</span></div><StatusBadge status="已验证" /><span className="meta-spacer" /><span className="lineage"><Database size={14} /> 来源坐标已保留</span></div><div className="data-preview" role="table" aria-label="表格预览"><div className="data-row data-head"><span>选项</span><span>Total (A)</span><span>Male (B)</span><span>Female (C)</span><span>来源</span></div>{tableRows.map((row) => <div className="data-row" key={row.label}><strong>{row.label}</strong><span>{row.total}</span><span>{row.male} {row.maleSig && <em className="sig-marker">{row.maleSig}</em>}</span><span>{row.female} {row.femaleSig && <em className="sig-marker">{row.femaleSig}</em>}</span><span className="mono-cell source-cell">{row.source}</span></div>)}</div><div className="table-note"><span><ShieldCheck size={14} />Python 已从源文件回读；AI 只提供结构建议</span><span><span className="legend-dot" />`-`、0 和不可用值保持区分</span></div></> : <div className="empty-workflow"><div className="empty-icon"><Database size={23} /></div><h2>当前 Sheet 尚无可展示的提取数据</h2><p>Python 已保存扫描和识别状态；通过边界校验后，真实 raw/display/parsed 数据会显示在这里。</p></div>}
           </section>
-          </> : <WorkflowPanel activeView={activeView} fileVersions={fileVersions} processingJob={processingJob} recognitionResult={recognitionResult} extractionTables={extractionTables} reviewIssues={reviewIssues} onResolveReviewIssue={resolveReviewIssue} setShowUpload={setShowUpload} selectedSheet={selectedSheet} setSelectedSheet={setSelectedSheet} />}
+          </> : <WorkflowPanel activeView={activeView} fileVersions={fileVersions} processingJob={processingJob} recognitionResult={recognitionResult} extractionTables={extractionTables} reviewIssues={reviewIssues} explorerDetail={explorerDetail} setExplorerDetail={setExplorerDetail} onResolveReviewIssue={resolveReviewIssue} setShowUpload={setShowUpload} selectedSheet={selectedSheet} setSelectedSheet={setSelectedSheet} />}
         </div>
       </main>
 
@@ -520,14 +536,19 @@ function ExtractedTablePreview({ table }: { table: ExtractedTable }) {
   </>;
 }
 
-function ReviewIssueList({ issues, onResolve, compact = false }: { issues: ReviewIssue[]; onResolve: (issue: ReviewIssue) => void; compact?: boolean }) {
+function SourceEvidencePanel({ table }: { table: ExtractedTable }) {
+  return <div className="workspace-card recognition-detail-card"><div className="section-kicker">SOURCE EVIDENCE · {table.source_sheet}</div><h2>原始来源</h2><p>{table.source_range}。以下内容来自 Python 对源 Workbook 的回读，不由模型生成。</p><div className="proposal-row"><strong>表头路径</strong>{table.headers.map((header) => <span key={header.extracted_header_id}>{header.header_path.join(" / ") || "未命名"} · {(header.source_header_cells ?? []).join(", ") || "—"}</span>)}</div><div className="proposal-row"><strong>数据源单元格</strong>{table.rows.flatMap((row) => row.cells).slice(0, 12).map((cell) => <span key={cell.source_cell}>{cell.source_cell} · {cell.excel_display_value} · raw: {String(cell.raw_value ?? "null")}</span>)}</div></div>;
+}
+
+function ReviewIssueList({ issues, onResolve, compact = false }: { issues: ReviewIssue[]; onResolve: (issue: ReviewIssue, creatorNote?: string) => void; compact?: boolean }) {
+  const [notes, setNotes] = useState<Record<string, string>>({});
   if (issues.length === 0) {
     return <div className="empty-workflow"><div className="empty-icon"><ShieldCheck size={23} /></div><h2>当前没有待处理问题</h2><p>这里只展示 Python 校验或提取证据产生的风险项。</p></div>;
   }
-  return <div className="issue-list">{issues.map((issue, index) => <div className="issue-row" key={issue.review_issue_id}><span className="issue-number warning">{String(index + 1).padStart(2, "0")}</span><div><strong>{issue.message}</strong><span>{issue.object_type} · {issue.object_id} · {issue.severity}</span></div><span className="issue-status warning"><AlertTriangle size={12} />{issue.status === "open" ? "需确认" : issue.status}</span>{!compact && <button className="button secondary" onClick={() => onResolve(issue)}>确认已处理</button>}</div>)}</div>;
+  return <div className="issue-list">{issues.map((issue, index) => <div className="issue-row" key={issue.review_issue_id}><span className="issue-number warning">{String(index + 1).padStart(2, "0")}</span><div><strong>{issue.message}</strong><span>{issue.object_type} · {issue.object_id} · {issue.severity}</span></div><span className="issue-status warning"><AlertTriangle size={12} />{issue.status === "open" ? "需确认" : issue.status}</span>{!compact && <div className="review-action"><input value={notes[issue.review_issue_id] ?? ""} onChange={(event) => setNotes((current) => ({ ...current, [issue.review_issue_id]: event.target.value }))} placeholder="处理备注（可选）" /><button className="button secondary" onClick={() => onResolve(issue, notes[issue.review_issue_id] ?? "")}>确认已处理</button></div>}</div>)}</div>;
 }
 
-function WorkflowPanel({ activeView, fileVersions, processingJob, recognitionResult, extractionTables, reviewIssues, onResolveReviewIssue, setShowUpload, selectedSheet, setSelectedSheet }: { activeView: Exclude<WorkflowView, "overview">; fileVersions: FileVersion[]; processingJob: ProcessingJob | null; recognitionResult: RecognitionResult | null; extractionTables: ExtractedTable[]; reviewIssues: ReviewIssue[]; onResolveReviewIssue: (issue: ReviewIssue) => void; setShowUpload: (open: boolean) => void; selectedSheet: string; setSelectedSheet: (sheet: string) => void }) {
+function WorkflowPanel({ activeView, fileVersions, processingJob, recognitionResult, extractionTables, reviewIssues, explorerDetail, setExplorerDetail, onResolveReviewIssue, setShowUpload, selectedSheet, setSelectedSheet }: { activeView: Exclude<WorkflowView, "overview">; fileVersions: FileVersion[]; processingJob: ProcessingJob | null; recognitionResult: RecognitionResult | null; extractionTables: ExtractedTable[]; reviewIssues: ReviewIssue[]; explorerDetail: ExplorerDetail; setExplorerDetail: (detail: ExplorerDetail) => void; onResolveReviewIssue: (issue: ReviewIssue, creatorNote?: string) => void; setShowUpload: (open: boolean) => void; selectedSheet: string; setSelectedSheet: (sheet: string) => void }) {
   const panelCopy: Record<Exclude<WorkflowView, "overview">, { kicker: string; title: string; description: string }> = {
     versions: { kicker: "SOURCE FILE VERSIONS", title: "文件与版本", description: "管理追加文件和同一逻辑数据集的修正版，历史来源不会被覆盖。" },
     processing: { kicker: "PROCESSING STATUS", title: "识别进度", description: "当前没有正在运行的识别任务；启动真实任务后，这里显示阶段和后台处理状态。" },
@@ -547,7 +568,7 @@ function WorkflowPanel({ activeView, fileVersions, processingJob, recognitionRes
   const proposalsForSelectedSheet = selectedRecognitionSheet?.boundary_proposals ?? [];
   const selectedExtractedTable = extractionTables.find((table) => table.source_sheet === selectedSheet);
   const openIssues = reviewIssues.filter((issue) => issue.status === "open" || issue.status === "in_review");
-  return <section className="standalone-view"><div className="page-header"><div><div className="eyebrow">{copy.kicker} · CREATOR WORKSPACE</div><h1>{copy.title}</h1><p>{copy.description}</p></div>{activeView === "versions" && <button className="button primary" onClick={() => setShowUpload(true)}><Plus size={16} />追加文件</button>}</div>{activeView === "versions" && <div className="workspace-card standalone-card"><div className="version-list">{fileVersions.map((version, index) => <div className="version-row" key={version.id}><span className="version-number">{index === 0 ? "当前" : version.id.replace("sfv_", "v")}</span><div className="version-file"><FileSpreadsheet size={15} /><strong>{version.fileName}</strong></div><span>{version.market}</span><span>{version.wave}</span><span className="version-relation">{version.relation}</span><StatusBadge status={version.status} /><button className="icon-button" title="版本详情"><ArrowUpRight size={15} /></button></div>)}</div></div>}{activeView === "processing" && processingJob && <div className="workspace-card processing-card"><div className="section-kicker">BACKGROUND JOB · {processingJob.job_id}</div><h2>{processingJob.status === "completed" ? "识别任务已完成" : processingJob.status === "failed" ? "识别任务失败" : "识别任务处理中"}</h2><p>{processingJob.phase}。前端轮询不会把后台任务提前标记为失败。</p><div className="processing-progress"><div style={{ width: `${processingJob.progress_percent}%` }} /></div><div className="processing-meta"><span>{processingJob.progress_percent}%</span><span>{processingJob.source_file_version_id}</span></div>{processingJob.error_message && <div className="upload-error"><AlertTriangle size={14} />{processingJob.error_message}</div>}</div>}{activeView === "review" && <div className="review-detail-grid"><div className="workspace-card standalone-card"><div className="card-heading"><div><div className="section-kicker">OPEN ISSUES</div><h2>待处理问题</h2></div><span className="status-badge status-warning"><AlertTriangle size={12} />{openIssues.length} 个待确认</span></div><ReviewIssueList issues={openIssues} onResolve={onResolveReviewIssue} /></div><div className="workspace-card risk-explanation"><div className="section-kicker">PUBLICATION GATE</div><h2>{openIssues.some((issue) => issue.blocks_publication) ? "发布暂不可用" : "当前无发布阻断问题"}</h2><p>{openIssues.length ? "风险项未完成确认，源坐标和审计记录会被保留。" : "当前识别结果没有待处理的发布风险。"}</p></div></div>}{activeView === "explorer" && <div className="workspace-card standalone-card"><div className="table-toolbar"><label className="search-box"><Search size={16} /><input placeholder="搜索 Sheet 或来源类型" /></label><button className="filter-button">全部状态 <ChevronDown size={14} /></button></div><div className="sheet-table" role="table" aria-label="Data Explorer Sheet 列表">{explorerSheets.map((sheet) => <button key={sheet.name} className={`sheet-row ${selectedSheet === sheet.name ? "selected" : ""}`} onClick={() => setSelectedSheet(sheet.name)}><span className="sheet-name"><FileSpreadsheet size={16} /><span><strong>{sheet.name}</strong><small>{sheet.family}</small></span></span><span>{sheet.tables || "—"}</span><span className="mono-cell">{sheet.range}</span><span><StatusBadge status={sheet.status} /></span><ArrowUpRight size={15} /></button>)}</div><div className="table-note"><span><Database size={14} />选择 Sheet 后在下方查看真实提取结果</span><span>Source Lineage 已保留</span></div></div>}{activeView === "explorer" && selectedRecognitionSheet && <div className="workspace-card recognition-detail-card"><div className="section-kicker">VALIDATED STRUCTURE · {selectedRecognitionSheet.sheet_name}</div><h2>物理表结构提案</h2>{proposalsForSelectedSheet.length === 0 ? <p>当前 Sheet 没有返回物理表提案。</p> : proposalsForSelectedSheet.map((proposal, index) => <div className="proposal-row" key={`${proposal.source_range}-${index}`}><strong>{proposal.source_range}</strong><span>Header: {proposal.regions?.header_rows?.join(", ") || "—"}</span><span>Base: {proposal.regions?.base_rows?.join(", ") || "—"}</span><span>Data: {proposal.regions?.data_rows?.join(", ") || "—"}</span><span>Footnote: {proposal.regions?.footnote_rows?.join(", ") || "—"}</span><span>Sig: {proposal.regions?.significance_layout || "none"}</span></div>)}</div>}{activeView === "explorer" && (selectedExtractedTable ? <div className="workspace-card explorer-card"><ExtractedTablePreview table={selectedExtractedTable} /></div> : <div className="workspace-card empty-workflow"><div className="empty-icon"><Database size={23} /></div><h2>当前 Sheet 尚无可展示的提取数据</h2><p>完成边界校验后，Python 回读的真实表格会显示在这里。</p></div>)}{activeView === "dashboard" && <div className="workspace-card empty-workflow"><div className="empty-icon"><CircleHelp size={23} /></div><h2>Dashboard Draft 尚未启用</h2><p>完成表格识别、Review 和语义绑定后，才能安全创建可发布的 Dashboard Draft。</p></div>}{activeView === "processing" && !processingJob && <div className="workspace-card empty-workflow"><div className="empty-icon"><CircleHelp size={23} /></div><h2>等待识别任务</h2><p>上传文件后，后台任务会在这里显示 Workbook 扫描和后续识别阶段。</p><button className="button secondary" onClick={() => setShowUpload(true)}><Upload size={15} />返回上传文件</button></div>}</section>;
+  return <section className="standalone-view"><div className="page-header"><div><div className="eyebrow">{copy.kicker} · CREATOR WORKSPACE</div><h1>{copy.title}</h1><p>{copy.description}</p></div>{activeView === "versions" && <button className="button primary" onClick={() => setShowUpload(true)}><Plus size={16} />追加文件</button>}</div>{activeView === "versions" && <div className="workspace-card standalone-card"><div className="version-list">{fileVersions.map((version, index) => <div className="version-row" key={version.id}><span className="version-number">{index === 0 ? "当前" : version.id.replace("sfv_", "v")}</span><div className="version-file"><FileSpreadsheet size={15} /><strong>{version.fileName}</strong></div><span>{version.market}</span><span>{version.wave}</span><span className="version-relation">{version.relation}</span><StatusBadge status={version.status} /><button className="icon-button" title="版本详情"><ArrowUpRight size={15} /></button></div>)}</div></div>}{activeView === "processing" && processingJob && <div className="workspace-card processing-card"><div className="section-kicker">BACKGROUND JOB · {processingJob.job_id}</div><h2>{processingJob.status === "completed" ? "识别任务已完成" : processingJob.status === "failed" ? "识别任务失败" : "识别任务处理中"}</h2><p>{processingJob.phase}。前端轮询不会把后台任务提前标记为失败。</p><div className="processing-progress"><div style={{ width: `${processingJob.progress_percent}%` }} /></div><div className="processing-meta"><span>{processingJob.progress_percent}%</span><span>{processingJob.source_file_version_id}</span></div>{processingJob.error_message && <div className="upload-error"><AlertTriangle size={14} />{processingJob.error_message}</div>}</div>}{activeView === "review" && <div className="review-detail-grid"><div className="workspace-card standalone-card"><div className="card-heading"><div><div className="section-kicker">OPEN ISSUES</div><h2>待处理问题</h2></div><span className="status-badge status-warning"><AlertTriangle size={12} />{openIssues.length} 个待确认</span></div><ReviewIssueList issues={openIssues} onResolve={onResolveReviewIssue} /></div><div className="workspace-card risk-explanation"><div className="section-kicker">PUBLICATION GATE</div><h2>{openIssues.some((issue) => issue.blocks_publication) ? "发布暂不可用" : "当前无发布阻断问题"}</h2><p>{openIssues.length ? "风险项未完成确认，源坐标和审计记录会被保留。" : "当前识别结果没有待处理的发布风险。"}</p></div></div>}{activeView === "explorer" && <div className="workspace-card standalone-card"><div className="table-toolbar"><label className="search-box"><Search size={16} /><input placeholder="搜索 Sheet 或来源类型" /></label><button className="filter-button">全部状态 <ChevronDown size={14} /></button></div><div className="sheet-table" role="table" aria-label="Data Explorer Sheet 列表">{explorerSheets.map((sheet) => <button key={sheet.name} className={`sheet-row ${selectedSheet === sheet.name ? "selected" : ""}`} onClick={() => { setSelectedSheet(sheet.name); setExplorerDetail("none"); }}><span className="sheet-name"><FileSpreadsheet size={16} /><span><strong>{sheet.name}</strong><small>{sheet.family}</small></span></span><span>{sheet.tables || "—"}</span><span className="mono-cell">{sheet.range}</span><span><StatusBadge status={sheet.status} /></span><ArrowUpRight size={15} /></button>)}</div><div className="table-note"><span><Database size={14} />选择 Sheet 后在下方查看真实提取结果</span><span>Source Lineage 已保留</span></div></div>}{activeView === "explorer" && explorerDetail !== "source" && selectedRecognitionSheet && <div className="workspace-card recognition-detail-card"><div className="section-kicker">VALIDATED STRUCTURE · {selectedRecognitionSheet.sheet_name}</div><h2>物理表结构提案</h2>{proposalsForSelectedSheet.length === 0 ? <p>当前 Sheet 没有返回物理表提案。</p> : proposalsForSelectedSheet.map((proposal, index) => <div className="proposal-row" key={`${proposal.source_range}-${index}`}><strong>{proposal.source_range}</strong><span>Header: {proposal.regions?.header_rows?.join(", ") || "—"}</span><span>Base: {proposal.regions?.base_rows?.join(", ") || "—"}</span><span>Data: {proposal.regions?.data_rows?.join(", ") || "—"}</span><span>Footnote: {proposal.regions?.footnote_rows?.join(", ") || "—"}</span><span>Sig: {proposal.regions?.significance_layout || "none"}</span></div>)}</div>}{activeView === "explorer" && explorerDetail === "source" && selectedExtractedTable && <SourceEvidencePanel table={selectedExtractedTable} />}{activeView === "explorer" && explorerDetail !== "source" && (selectedExtractedTable ? <div className="workspace-card explorer-card"><ExtractedTablePreview table={selectedExtractedTable} /></div> : <div className="workspace-card empty-workflow"><div className="empty-icon"><Database size={23} /></div><h2>当前 Sheet 尚无可展示的提取数据</h2><p>完成边界校验后，Python 回读的真实表格会显示在这里。</p></div>)}{activeView === "dashboard" && (extractionTables.length ? <div className="dashboard-draft"><section className="summary-grid" aria-label="Dashboard 数据摘要"><SummaryCard label="已校验表格" value={String(extractionTables.length)} meta="当前文件版本" icon={<ShieldCheck size={18} />} tone="green" /><SummaryCard label="数据行" value={String(extractionTables.reduce((total, table) => total + table.rows.length, 0))} meta="不含模型生成数值" icon={<Database size={18} />} tone="neutral" /><SummaryCard label="待处理问题" value={String(openIssues.length)} meta={openIssues.length ? "发布仍受阻断" : "当前版本无阻断"} icon={<AlertTriangle size={18} />} tone="orange" /></section><div className="workspace-card explorer-card"><div className="card-heading"><div><div className="section-kicker">VALIDATED DATASET</div><h2>{extractionTables[0].detected_question_number || extractionTables[0].detected_table_title}</h2><p>Dashboard Draft 仅引用当前版本已通过 Python 校验的提取数据。</p></div></div><ExtractedTablePreview table={extractionTables[0]} /></div></div> : <div className="workspace-card empty-workflow"><div className="empty-icon"><CircleHelp size={23} /></div><h2>当前版本尚无可用 Dashboard 数据</h2><p>完成识别、Python 提取并通过 Review 后，才能创建可发布的 Dashboard Draft。</p></div>)}{activeView === "processing" && !processingJob && <div className="workspace-card empty-workflow"><div className="empty-icon"><CircleHelp size={23} /></div><h2>等待识别任务</h2><p>上传文件后，后台任务会在这里显示 Workbook 扫描和后续识别阶段。</p><button className="button secondary" onClick={() => setShowUpload(true)}><Upload size={15} />返回上传文件</button></div>}</section>;
 }
 
 function IssueRow({ number, title, detail, status, warning = false }: { number: string; title: string; detail: string; status: string; warning?: boolean }) {
