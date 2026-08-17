@@ -151,6 +151,14 @@ h2 { margin-top: 5px; font-size: 18px; letter-spacing: -.01em; }
 .search-box { height: 34px; display: flex; align-items: center; gap: 7px; flex: 1; padding: 0 10px; color: var(--color-text-secondary); background: #fafafa; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
 .search-box input { width: 100%; min-width: 0; color: var(--color-text-primary); background: transparent; border: 0; outline: 0; font-size: 12px; }
 .filter-button { min-height: 34px; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; color: var(--color-text-secondary); background: #fafafa; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: 11px; }
+.filter-button select { appearance: none; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.detail-list { display: grid; gap: 0; border-top: 1px solid var(--color-border); }
+.detail-list > div { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 0; border-bottom: 1px solid var(--color-border); font-size: 12px; }
+.detail-list > div > span { color: var(--color-text-secondary); }
+.detail-list strong { text-align: right; color: var(--color-text-primary); }
+.help-list { display: grid; gap: 12px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; }
+.help-list p { margin: 0; }
+.help-list strong { color: var(--color-text-primary); }
 .sheet-table { overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
 .sheet-row { min-height: 58px; width: 100%; display: grid; grid-template-columns: minmax(145px, 1.4fr) 48px minmax(100px, 1fr) 100px 24px; align-items: center; gap: 10px; padding: 0 12px; color: var(--color-text-primary); background: var(--color-surface); border-bottom: 1px solid var(--color-border); text-align: left; font-size: 12px; }
 .sheet-row:last-child { border-bottom: 0; }
