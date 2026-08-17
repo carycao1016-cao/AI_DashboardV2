@@ -480,7 +480,7 @@ export function App() {
           <div className="topbar-actions"><span className="saved-state"><Check size={14} />已保存</span><button className="icon-button" title="帮助" onClick={() => setShowHelp(true)}><CircleHelp size={18} /></button><button className="avatar-button" title="当前用户">CC</button></div>
         </header>
         <div className="workspace-scroll">
-          {activeView === "overview" ? <>
+          {!projectId ? <section className="workspace-card empty-workflow initial-workspace"><div className="empty-icon"><Plus size={23} /></div><h1>先创建一个项目</h1><p>项目用于汇总多个文件和版本；市场、Wave 与表头范围会在上传后由源文件证据识别。</p><button className="button primary" onClick={() => setShowProjectCreate(true)}><Plus size={16} />新建项目</button></section> : activeView === "overview" ? <>
           <section className="page-header">
             <div><div className="eyebrow">CREATOR WORKSPACE · {projectName.toUpperCase()} / {marketScope.toUpperCase()} / {waveScope.toUpperCase()}</div><h1>项目概览</h1><p>查看上传版本、表格识别状态和当前需要处理的结构问题。</p></div>
             <div className="page-actions"><button className="button secondary" onClick={() => setShowUpload(true)}><Upload size={16} />上传新版本</button><button className="button primary" onClick={startRecognition}><Sparkles size={16} />开始识别</button></div>
