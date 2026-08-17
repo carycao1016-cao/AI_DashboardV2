@@ -171,12 +171,12 @@ export function App() {
   const [showProjectCreate, setShowProjectCreate] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [projectName, setProjectName] = useState("Market Pulse");
-  const [projectId, setProjectId] = useState("prj_market-pulse");
+  const [projectName, setProjectName] = useState("未选择项目");
+  const [projectId, setProjectId] = useState("");
   const [draftProjectName, setDraftProjectName] = useState("");
   const [projectError, setProjectError] = useState("");
-  const [marketScope, setMarketScope] = useState("US");
-  const [waveScope, setWaveScope] = useState("Wave 1");
+  const [marketScope, setMarketScope] = useState("范围未设置");
+  const [waveScope, setWaveScope] = useState("波次未设置");
   const [uploadMarket, setUploadMarket] = useState("自动识别（推荐）");
   const [uploadMarketHint, setUploadMarketHint] = useState("");
   const [uploadWave, setUploadWave] = useState("自动识别（推荐）");
@@ -188,7 +188,7 @@ export function App() {
   const [uploadSubmitting, setUploadSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bootstrapStartedRef = useRef(false);
-  const [fileVersions, setFileVersions] = useState<FileVersion[]>(initialFileVersions);
+  const [fileVersions, setFileVersions] = useState<FileVersion[]>([]);
   const [selectedSourceVersionId, setSelectedSourceVersionId] = useState("");
   const [processingJob, setProcessingJob] = useState<ProcessingJob | null>(null);
   const [recognitionResult, setRecognitionResult] = useState<RecognitionResult | null>(null);
@@ -262,23 +262,18 @@ export function App() {
   useEffect(() => {
     if (bootstrapStartedRef.current) return;
     bootstrapStartedRef.current = true;
-    void loadProjects().catch((error: Error) => setProjectError(error.message));
-    void loadProject("prj_market-pulse").catch(async (error: Error) => {
-      if (!error.message.includes("项目不存在")) return;
+    void (async () => {
       try {
-        const response = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ project_name: "Market Pulse" }),
-        });
+        const response = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects`);
         const payload = await response.json();
-        if (!response.ok || !payload.success) throw new Error(payload.detail || "创建默认项目失败");
-        applyProject({ ...(payload.data as Omit<ApiProject, "source_file_versions">), source_file_versions: [] });
-        setProjects((current) => [...current, payload.data as ProjectSummary]);
-      } catch (createError) {
-        setProjectError(createError instanceof Error ? createError.message : "无法连接本地后端");
+        if (!response.ok || !payload.success) throw new Error(payload.detail || "读取项目列表失败");
+        const availableProjects = payload.data as ProjectSummary[];
+        setProjects(availableProjects);
+        if (availableProjects[0]) await loadProject(availableProjects[0].project_id, "");
+      } catch (error) {
+        setProjectError(error instanceof Error ? error.message : "无法连接本地后端");
       }
-    });
+    })();
   }, []);
 
   const createProject = async () => {
@@ -360,6 +355,10 @@ export function App() {
   };
 
   const startRecognition = async () => {
+    if (!projectId) {
+      setProjectError("请先新建或选择项目");
+      return;
+    }
     const version = fileVersions.find((item) => item.id === selectedSourceVersionId && item.status === "已扫描");
     if (!version) {
       setProjectError("没有可开始识别的已扫描文件版本");
@@ -381,6 +380,10 @@ export function App() {
 
   const completeUpload = async () => {
     if (!selectedFile) return;
+    if (!projectId) {
+      setUploadError("请先新建或选择项目");
+      return;
+    }
     const isReplacement = uploadMode === "replace";
     setUploadError("");
     setUploadSubmitting(true);
