@@ -28,13 +28,25 @@ def run_ai_recognition(job_id: str, source_path: str) -> None:
         for index, sheet_name in enumerate(sheet_names, 1):
             progress = 10 + int((index - 1) / max(len(sheet_names), 1) * 80)
             update_processing_job(job_id, status="running", phase=f"AI 识别 Sheet：{sheet_name}", progress_percent=progress)
+
+            def report_sheet_phase(phase: str) -> None:
+                """把耗时的本地读取与模型等待区别显示，避免前端只看到固定 10%。"""
+                update_processing_job(
+                    job_id,
+                    status="running",
+                    phase=f"Sheet {sheet_name}：{phase}",
+                    progress_percent=min(progress + 5, 89),
+                )
+
             outlines, details, validations = run_xlsx_sheet_with_adapter(
                 path=Path(source_path),
                 sheet_name=sheet_name,
                 adapter=adapter,
                 target_tokens=AI_OUTLINE_TARGET_TOKENS,
                 hard_tokens=AI_OUTLINE_HARD_TOKENS,
+                progress_callback=report_sheet_phase,
             )
+            report_sheet_phase("Python 校验与提取")
             extracted_tables = []
             validation_index = 0
             for detail_response in details:

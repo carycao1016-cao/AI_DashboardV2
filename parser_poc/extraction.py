@@ -10,7 +10,7 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter, range_boundaries
 
 from parser_poc.contracts import BoundaryValidationResult, SignificanceLayout, TableBoundaryProposal, ValidationOutcome
-from parser_poc.workbook_scan import approximate_display_value, cell_type, json_safe
+from parser_poc.workbook_scan import approximate_display_value, cache_read_only_sheet_window, cell_type, json_safe
 
 
 _MISSING_TEXT = {"-", "- ", "—", "–"}
@@ -104,9 +104,17 @@ def extract_validated_table(
     try:
         if proposal.sheet_name not in workbook_values.sheetnames:
             raise ValueError("Sheet not found: %s" % proposal.sheet_name)
-        value_sheet = workbook_values[proposal.sheet_name]
-        formula_sheet = workbook_formulas[proposal.sheet_name]
         min_col, min_row, max_col, max_row = range_boundaries(proposal.source_range)
+        # 表头、显著性和数值循环都使用同一个内存缓存，禁止循环中调用只读 Sheet 的 cell()。
+        required_rows = [min_row, *proposal.regions.title_rows, *proposal.regions.header_rows]
+        value_sheet, formula_sheet = cache_read_only_sheet_window(
+            workbook_values[proposal.sheet_name],
+            workbook_formulas[proposal.sheet_name],
+            min_row=max(1, min(required_rows)),
+            max_row=max_row,
+            min_column=1,
+            max_column=max_col,
+        )
         if validation.outcome not in {ValidationOutcome.ACCEPTED, ValidationOutcome.ADJUSTED}:
             review_status = "review_required"
         else:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter, range_boundaries
@@ -26,6 +26,7 @@ from parser_poc.workbook_scan import (
     DEFAULT_HARD_TOKENS,
     DEFAULT_TARGET_TOKENS,
     build_detail_window,
+    cache_read_only_sheet_window,
     plan_detail_windows,
     scan_workbook,
     xlsx_sheet_metadata,
@@ -247,12 +248,15 @@ def run_xlsx_sheet_with_adapter(
     detail_context_before: int = 20,
     detail_context_after: int = 20,
     max_candidate_gap_rows: int = 20,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> tuple[list[SheetOutlineResponse], list[DetailWindowResponse], list[BoundaryValidationResult]]:
     """对一个 XLSX Sheet 执行真实的两层流程，并由 Python 提供 Detail 样本。
 
     Layer 1 只接收 WorkbookScanSummary 的 Outline。只有模型返回候选后，Python
     才按候选窗口重读原始单元格并生成 Detail Window；因此模型不会直接读取整张 Sheet。
     """
+    if progress_callback:
+        progress_callback("构建结构摘要")
     summary = scan_workbook(
         path,
         target_tokens=target_tokens,
@@ -260,14 +264,15 @@ def run_xlsx_sheet_with_adapter(
         sheet_name=sheet_name,
     )
     sheet_summary = summary["sheets"][0]
-    outline_responses = [
-        adapter.generate_structured(
+    if progress_callback:
+        progress_callback("等待 AI Outline 响应")
+    outline_responses = []
+    for chunk in sheet_summary["outline_chunks"]:
+        outline_responses.append(adapter.generate_structured(
             task_name="sheet_outline",
             payload={"sheet_name": sheet_name, **chunk},
             output_model=SheetOutlineResponse,
-        )
-        for chunk in sheet_summary["outline_chunks"]
-    ]
+        ))
     total_rows = range_boundaries(sheet_summary["scan_range"])[3]
     total_columns = range_boundaries(sheet_summary["scan_range"])[2]
     detail_requests = build_detail_requests(
@@ -281,13 +286,25 @@ def run_xlsx_sheet_with_adapter(
     if not detail_requests:
         return outline_responses, [], []
 
+    if progress_callback:
+        progress_callback("读取候选 Detail 窗口")
     layout = xlsx_sheet_metadata(path)[sheet_name]
     value_book = load_workbook(path, read_only=True, data_only=True)
     formula_book = load_workbook(path, read_only=True, data_only=False)
     try:
-        value_sheet = value_book[sheet_name]
-        formula_sheet = formula_book[sheet_name]
+        # 后续校正会多次按坐标读取。仅缓存 AI 已提出候选的 Detail 窗口，
+        # 避免 ReadOnlyWorksheet.cell() 为每一个坐标重复解析整份 Sheet XML。
+        detail_start = min(request.window_row_start for request in detail_requests)
+        detail_end = max(request.window_row_end for request in detail_requests)
+        value_sheet, formula_sheet = cache_read_only_sheet_window(
+            value_book[sheet_name],
+            formula_book[sheet_name],
+            min_row=detail_start,
+            max_row=detail_end,
+        )
         detail_responses = []
+        if progress_callback:
+            progress_callback("等待 AI Detail 响应")
         for request in detail_requests:
             detail_payload = build_detail_window(
                 value_sheet,
@@ -309,6 +326,8 @@ def run_xlsx_sheet_with_adapter(
                     output_model=DetailWindowResponse,
                 )
             )
+        if progress_callback:
+            progress_callback("校正候选边界")
         normalized_responses: list[DetailWindowResponse] = []
         normalization_notes: dict[str, list[str]] = {}
         for response in detail_responses:

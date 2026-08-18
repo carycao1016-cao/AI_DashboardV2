@@ -9,6 +9,7 @@ import math
 import re
 import zipfile
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -35,6 +36,96 @@ OUTLINE_ROW_SCHEMA = [
 ]
 
 ENCODING_CANDIDATES = ("utf-8-sig", "utf-8", "gb18030", "gbk", "big5")
+
+
+@dataclass(frozen=True)
+class CachedCell:
+    """只保留解析/提取需要的单元格属性，避免只读模式随机回读。"""
+
+    row: int
+    column: int
+    value: Any = None
+    data_type: str = "n"
+    number_format: str = "General"
+
+    @property
+    def coordinate(self) -> str:
+        return "%s%s" % (get_column_letter(self.column), self.row)
+
+
+class CachedWorksheet:
+    """由单次流式读取构建的 Sheet 局部缓存。
+
+    openpyxl 的 ``ReadOnlyWorksheet.cell()`` 会从 XML 开头重新扫描至目标行。
+    候选窗口校正与提取需要按坐标多次取值，必须先读取到内存再访问。
+    """
+
+    def __init__(self, title: str, max_row: int, max_column: int, cells: Dict[tuple[int, int], CachedCell]) -> None:
+        self.title = title
+        self.max_row = max_row
+        self.max_column = max_column
+        self._cells = cells
+
+    def cell(self, row: int, column: int) -> CachedCell:
+        if row < 1 or column < 1:
+            raise ValueError("Row and column must be positive")
+        return self._cells.get((row, column), CachedCell(row=row, column=column))
+
+    def iter_rows(
+        self,
+        min_row: int | None = None,
+        max_row: int | None = None,
+        min_col: int | None = None,
+        max_col: int | None = None,
+    ) -> Iterable[tuple[CachedCell, ...]]:
+        first_row = min_row or 1
+        last_row = max_row or self.max_row
+        first_col = min_col or 1
+        last_col = max_col or self.max_column
+        for row_number in range(first_row, last_row + 1):
+            yield tuple(self.cell(row_number, column_number) for column_number in range(first_col, last_col + 1))
+
+
+def cache_read_only_sheet_window(
+    value_sheet: Any,
+    formula_sheet: Any,
+    *,
+    min_row: int,
+    max_row: int,
+    min_column: int = 1,
+    max_column: int | None = None,
+) -> tuple[CachedWorksheet, CachedWorksheet]:
+    """单次流式读取 Value/Formula Sheet 的同一窗口，返回可随机访问的缓存。"""
+    if min_row < 1 or max_row < min_row or min_column < 1:
+        raise ValueError("Invalid cache window")
+    last_column = max_column or value_sheet.max_column
+    if last_column < min_column:
+        raise ValueError("Invalid cache columns")
+
+    value_cells: Dict[tuple[int, int], CachedCell] = {}
+    formula_cells: Dict[tuple[int, int], CachedCell] = {}
+    value_rows = value_sheet.iter_rows(min_row=min_row, max_row=max_row, min_col=min_column, max_col=last_column)
+    formula_rows = formula_sheet.iter_rows(min_row=min_row, max_row=max_row, min_col=min_column, max_col=last_column)
+    for row_number, (value_row, formula_row) in enumerate(zip(value_rows, formula_rows), min_row):
+        for column_number, (value_cell, formula_cell) in enumerate(zip(value_row, formula_row), min_column):
+            value_cells[(row_number, column_number)] = CachedCell(
+                row=row_number,
+                column=column_number,
+                value=attribute(value_cell, "value"),
+                data_type=attribute(value_cell, "data_type", "n"),
+                number_format=attribute(value_cell, "number_format", "General"),
+            )
+            formula_cells[(row_number, column_number)] = CachedCell(
+                row=row_number,
+                column=column_number,
+                value=attribute(formula_cell, "value"),
+                data_type=attribute(formula_cell, "data_type", "n"),
+                number_format=attribute(formula_cell, "number_format", "General"),
+            )
+    return (
+        CachedWorksheet(value_sheet.title, value_sheet.max_row, value_sheet.max_column, value_cells),
+        CachedWorksheet(formula_sheet.title, formula_sheet.max_row, formula_sheet.max_column, formula_cells),
+    )
 
 
 def json_safe(value: Any) -> Any:
