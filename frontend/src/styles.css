@@ -160,6 +160,7 @@ h2 { margin-top: 5px; font-size: 18px; letter-spacing: -.01em; }
 .help-list p { margin: 0; }
 .help-list strong { color: var(--color-text-primary); }
 .processing-guidance { max-width: 640px; margin-top: 8px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; }
+.project-binding { overflow: hidden; color: var(--color-text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .sheet-table { overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
 .sheet-row { min-height: 58px; width: 100%; display: grid; grid-template-columns: minmax(145px, 1.4fr) 48px minmax(100px, 1fr) 100px 24px; align-items: center; gap: 10px; padding: 0 12px; color: var(--color-text-primary); background: var(--color-surface); border-bottom: 1px solid var(--color-border); text-align: left; font-size: 12px; }
 .sheet-row:last-child { border-bottom: 0; }
