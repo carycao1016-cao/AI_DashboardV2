@@ -48,6 +48,8 @@ def _truthy(value: str) -> bool:
 AI_ENABLED = _truthy(_setting("PARSER_AI_ENABLED", "false"))
 AI_PROFILE = _setting("PARSER_AI_PROFILE", "deepseek").casefold()
 AI_MAX_SHEETS = max(1, int(_setting("PARSER_AI_MAX_SHEETS", "1")))
+AI_OUTLINE_TARGET_TOKENS = max(1_000, int(_setting("PARSER_AI_OUTLINE_TARGET_TOKENS", "16000")))
+AI_OUTLINE_HARD_TOKENS = max(AI_OUTLINE_TARGET_TOKENS, int(_setting("PARSER_AI_OUTLINE_HARD_TOKENS", "20000")))
 
 if AI_PROFILE not in {"deepseek", "doubao"}:
     raise ValueError("PARSER_AI_PROFILE 只能是 deepseek 或 doubao")

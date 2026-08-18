@@ -11,7 +11,7 @@ from parser_poc.extraction import extract_validated_table
 from parser_poc.orchestration import run_xlsx_sheet_with_adapter
 
 from ..infrastructure.db import update_processing_job
-from ..settings import AI_MAX_SHEETS, AI_PROFILE
+from ..settings import AI_MAX_SHEETS, AI_OUTLINE_HARD_TOKENS, AI_OUTLINE_TARGET_TOKENS, AI_PROFILE
 
 
 def run_ai_recognition(job_id: str, source_path: str) -> None:
@@ -29,7 +29,11 @@ def run_ai_recognition(job_id: str, source_path: str) -> None:
             progress = 10 + int((index - 1) / max(len(sheet_names), 1) * 80)
             update_processing_job(job_id, status="running", phase=f"AI 识别 Sheet：{sheet_name}", progress_percent=progress)
             outlines, details, validations = run_xlsx_sheet_with_adapter(
-                path=Path(source_path), sheet_name=sheet_name, adapter=adapter,
+                path=Path(source_path),
+                sheet_name=sheet_name,
+                adapter=adapter,
+                target_tokens=AI_OUTLINE_TARGET_TOKENS,
+                hard_tokens=AI_OUTLINE_HARD_TOKENS,
             )
             extracted_tables = []
             validation_index = 0
