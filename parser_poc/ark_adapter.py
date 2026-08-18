@@ -179,28 +179,6 @@ class ArkStructuredAdapter:
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ArkResponseError("Ark response envelope is not valid UTF-8 JSON") from exc
 
-
-def _safe_http_error_diagnostic(error: HTTPError) -> str:
-    """提取有限的 Ark 错误说明，避免将请求数据或敏感信息写入任务状态。"""
-    try:
-        raw_body = error.read(4096).decode("utf-8", errors="replace")
-        payload = json.loads(raw_body)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return ""
-    if not isinstance(payload, dict):
-        return ""
-    candidate = payload.get("error", payload)
-    if not isinstance(candidate, dict):
-        return ""
-    code = candidate.get("code")
-    message = candidate.get("message") or candidate.get("msg")
-    details = []
-    if isinstance(code, str) and code.strip():
-        details.append(code.strip()[:80])
-    if isinstance(message, str) and message.strip():
-        details.append(" ".join(message.split())[:360])
-    return ": " + " | ".join(details) if details else ""
-
     def generate_structured(
         self,
         *,
@@ -277,3 +255,25 @@ def _safe_http_error_diagnostic(error: HTTPError) -> str:
             )
             return result
         raise ArkResponseError("Ark returned invalid structured output after one repair attempt") from last_error
+
+
+def _safe_http_error_diagnostic(error: HTTPError) -> str:
+    """提取有限的 Ark 错误说明，避免将请求数据或敏感信息写入任务状态。"""
+    try:
+        raw_body = error.read(4096).decode("utf-8", errors="replace")
+        payload = json.loads(raw_body)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    candidate = payload.get("error", payload)
+    if not isinstance(candidate, dict):
+        return ""
+    code = candidate.get("code")
+    message = candidate.get("message") or candidate.get("msg")
+    details = []
+    if isinstance(code, str) and code.strip():
+        details.append(code.strip()[:80])
+    if isinstance(message, str) and message.strip():
+        details.append(" ".join(message.split())[:360])
+    return ": " + " | ".join(details) if details else ""
