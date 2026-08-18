@@ -16,10 +16,12 @@ ARK_API_KEY='由方舟控制台创建的 API Key'
 ARK_DEEPSEEK_MODEL='DeepSeek 的推理接入点 ID'
 ARK_DOUBAO_MODEL='豆包模型的推理接入点 ID'
 ARK_BASE_URL='https://ark.cn-beijing.volces.com/api/v3'
-ARK_TIMEOUT_SECONDS='120'
+ARK_TIMEOUT_SECONDS='300'
 ```
 
 `ARK_API_KEY` 只能放在此被 Git 忽略的本机文件或部署环境的密钥管理服务中，不能写入代码、测试、Git 提交或 Golden 报告。部署环境应使用平台密钥管理，而不是本地文件。
+
+前台小批量测试建议将 `ARK_TIMEOUT_SECONDS` 设为 `300`。这只限制单次模型调用的最长等待时间，不会让系统自动重试或自动发送额外请求。
 
 ## 创建适配器
 
