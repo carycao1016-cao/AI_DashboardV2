@@ -255,7 +255,20 @@ def get_latest_processing_job(project_id: str, source_file_version_id: str, job_
         row = connection.execute(
             """SELECT job_id FROM processing_jobs
             WHERE project_id = ? AND source_file_version_id = ? AND job_type = ?
-            ORDER BY created_at DESC LIMIT 1""",
+            ORDER BY created_at DESC, rowid DESC LIMIT 1""",
+            (project_id, source_file_version_id, job_type),
+        ).fetchone()
+    return get_processing_job(project_id, row["job_id"]) if row else None
+
+
+def get_active_processing_job(project_id: str, source_file_version_id: str, job_type: str) -> dict[str, Any] | None:
+    """返回同一文件仍在排队或执行的任务，防止重复触发外部模型请求。"""
+    with connect() as connection:
+        row = connection.execute(
+            """SELECT job_id FROM processing_jobs
+            WHERE project_id = ? AND source_file_version_id = ? AND job_type = ?
+            AND status IN ('queued', 'running')
+            ORDER BY created_at DESC, rowid DESC LIMIT 1""",
             (project_id, source_file_version_id, job_type),
         ).fetchone()
     return get_processing_job(project_id, row["job_id"]) if row else None

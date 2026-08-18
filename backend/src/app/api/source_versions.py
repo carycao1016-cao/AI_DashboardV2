@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, status
 
-from ..infrastructure.db import add_source_file_version, create_processing_job, get_latest_processing_job, get_processing_job, get_project, get_review_issue_states, get_source_file_version, set_review_issue_state
+from ..infrastructure.db import add_source_file_version, create_processing_job, get_active_processing_job, get_latest_processing_job, get_processing_job, get_project, get_review_issue_states, get_source_file_version, set_review_issue_state
 from ..pipelines.ingestion import run_workbook_scan
 from ..pipelines.recognition import run_ai_recognition
 from ..schemas.projects import ResolveReviewIssueRequest
@@ -193,6 +193,12 @@ def start_recognition(
         raise HTTPException(status_code=404, detail="文件版本不存在")
     if version["scan_status"] != "completed":
         raise HTTPException(status_code=409, detail="Python Workbook 扫描尚未完成")
+    active_job = get_active_processing_job(project_id, source_file_version_id, "recognition")
+    if active_job is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"当前文件已有识别任务正在运行：{active_job['job_id']}。请在识别进度查看状态。",
+        )
     job_id = f"job_{uuid.uuid4().hex[:12]}"
     create_processing_job(job_id, project_id, source_file_version_id, "recognition")
     background_tasks.add_task(run_ai_recognition, job_id, version["storage_path"])
