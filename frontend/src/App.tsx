@@ -71,6 +71,9 @@ type RecognitionResult = {
   job_id: string;
   source_file_version_id: string;
   status: string;
+  phase?: string;
+  progress_percent?: number;
+  error_message?: string | null;
   result: { sheets?: RecognitionSheet[]; provider?: string; max_sheets?: number };
 };
 
@@ -214,7 +217,19 @@ export function App() {
       return;
     }
     const recognitionPayload = await recognitionResponse.json();
-    setRecognitionResult(recognitionPayload.success ? recognitionPayload.data as RecognitionResult : null);
+    const recognition = recognitionPayload.success ? recognitionPayload.data as RecognitionResult : null;
+    setRecognitionResult(recognition);
+    if (recognition) {
+      setProcessingJob({
+        job_id: recognition.job_id,
+        source_file_version_id: recognition.source_file_version_id,
+        status: recognition.status as ProcessingJob["status"],
+        phase: recognition.phase || "AI 识别状态未知",
+        progress_percent: recognition.progress_percent ?? 0,
+        error_message: recognition.error_message || null,
+      });
+      if (recognition.status === "failed") setProjectError(recognition.error_message || "AI 识别失败");
+    }
     const extractionResponse = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/source-versions/${selectedVersion.source_file_version_id}/extraction`);
     if (!extractionResponse.ok) {
       setExtractionTables([]);
@@ -310,7 +325,8 @@ export function App() {
   const openReviewIssues = reviewIssues.filter((issue) => issue.status === "open" || issue.status === "in_review");
 
   const pollProcessingJob = async (id: string, jobId: string) => {
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    // 方舟模型单次请求可能接近超时上限；轮询持续 15 分钟，避免 60 秒后把仍在运行的任务误报为卡住。
+    for (let attempt = 0; attempt < 900; attempt += 1) {
       const response = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/jobs/${jobId}`);
       const payload = await response.json();
       if (!response.ok || !payload.success) throw new Error(payload.detail || "读取识别任务失败");
@@ -321,9 +337,9 @@ export function App() {
         if (job.status === "failed") setProjectError(job.error_message || "Workbook 扫描失败");
         return;
       }
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
     }
-    setProjectError("识别任务仍在后台处理，请稍后查看识别进度");
+    setProjectError("识别任务仍在后台处理；刷新页面或切换回识别进度可恢复真实状态");
   };
 
   const startRecognition = async () => {

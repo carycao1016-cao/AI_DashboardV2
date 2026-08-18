@@ -212,6 +212,8 @@ def get_recognition_results(project_id: str, source_file_version_id: str) -> dic
             "source_file_version_id": source_file_version_id,
             "status": job["status"],
             "phase": job["phase"],
+            "progress_percent": job["progress_percent"],
+            "error_message": job["error_message"],
             "result": job["result"],
         },
     }

@@ -166,7 +166,9 @@ class ArkStructuredAdapter:
         try:
             raw_response = self._transport(request, self.config.timeout_seconds)
         except HTTPError as exc:
-            raise ArkRequestError("Ark HTTP request failed with status %s" % exc.code) from exc
+            # 只保留 Provider 的错误码和简短说明，便于本地排错；绝不记录请求体、Workbook 内容或 API Key。
+            diagnostic = _safe_http_error_diagnostic(exc)
+            raise ArkRequestError("Ark HTTP request failed with status %s%s" % (exc.code, diagnostic)) from exc
         except URLError as exc:
             raise ArkRequestError("Ark network request failed") from exc
         except (TimeoutError, socket.timeout) as exc:
@@ -176,6 +178,28 @@ class ArkStructuredAdapter:
             return decoded
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ArkResponseError("Ark response envelope is not valid UTF-8 JSON") from exc
+
+
+def _safe_http_error_diagnostic(error: HTTPError) -> str:
+    """提取有限的 Ark 错误说明，避免将请求数据或敏感信息写入任务状态。"""
+    try:
+        raw_body = error.read(4096).decode("utf-8", errors="replace")
+        payload = json.loads(raw_body)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    candidate = payload.get("error", payload)
+    if not isinstance(candidate, dict):
+        return ""
+    code = candidate.get("code")
+    message = candidate.get("message") or candidate.get("msg")
+    details = []
+    if isinstance(code, str) and code.strip():
+        details.append(code.strip()[:80])
+    if isinstance(message, str) and message.strip():
+        details.append(" ".join(message.split())[:360])
+    return ": " + " | ".join(details) if details else ""
 
     def generate_structured(
         self,
