@@ -31,16 +31,6 @@ type Status = "已验证" | "需 Review" | "处理中" | "已扫描";
 type WorkflowView = "overview" | "versions" | "processing" | "review" | "explorer" | "dashboard";
 type ExplorerDetail = "none" | "source" | "recognition";
 
-type TableRow = {
-  label: string;
-  total: string;
-  male: string;
-  maleSig: string;
-  female: string;
-  femaleSig: string;
-  source: string;
-};
-
 type FileVersion = {
   id: string;
   fileName: string;
@@ -129,24 +119,6 @@ type ReviewIssue = {
   creator_note: string | null;
   blocks_publication: boolean;
 };
-
-const tableRows: TableRow[] = [
-  { label: "男", total: "43.9%", male: "100.0%", maleSig: "C", female: "0.0%", femaleSig: "", source: "D17" },
-  { label: "女", total: "56.1%", male: "0.0%", maleSig: "", female: "100.0%", femaleSig: "B", source: "D18" },
-  { label: "Base", total: "1,000", male: "439", maleSig: "", female: "561", femaleSig: "", source: "B16" },
-];
-
-const sheets = [
-  { name: "Percentages_Sig1", family: "Decipher", tables: 3, status: "已验证" as Status, range: "A12:AW18" },
-  { name: "ban1_%Sig", family: "Quantum", tables: 3, status: "已验证" as Status, range: "A2:AB77" },
-  { name: "ban2_%Sig", family: "Quantum", tables: 3, status: "需 Review" as Status, range: "A80:AB609" },
-  { name: "Index", family: "Decipher", tables: 0, status: "已验证" as Status, range: "not_a_table" },
-];
-
-const initialFileVersions: FileVersion[] = [
-  { id: "sfv_002", fileName: "Market_Pulse_US_Wave1.xlsx", market: "US", wave: "Wave 1", status: "已验证", relation: "当前版本" },
-  { id: "sfv_001", fileName: "Market_Pulse_US_Wave1_original.xlsx", market: "US", wave: "Wave 1", status: "已验证", relation: "历史版本" },
-];
 
 const workflow = [
   { id: "overview" as WorkflowView, label: "项目概览", icon: LayoutDashboard, state: "complete" },
@@ -435,7 +407,7 @@ export function App() {
         const hasReview = validations.some((validation) => validation.outcome === "review_required" || validation.outcome === "rejected");
         return { name: sheet.sheet_name, family: "AI 识别", tables: proposals.length, status: (hasReview ? "需 Review" : "已验证") as Status, range: proposals[0]?.source_range || "未返回范围" };
       });
-      const inventory = recognizedSheets?.length ? recognizedSheets : sheets;
+      const inventory = recognizedSheets ?? [];
       return inventory.filter((sheet) => {
         const matchesQuery = `${sheet.name} ${sheet.family}`.toLowerCase().includes(query.toLowerCase());
         const matchesStatus = statusFilter === "全部状态" || sheet.status === statusFilter;
@@ -444,6 +416,9 @@ export function App() {
     },
     [query, recognitionResult, statusFilter],
   );
+  const recognizedTableCount = filteredSheets.reduce((total, sheet) => total + (sheet.tables || 0), 0);
+  const scannedVersionCount = fileVersions.filter((version) => version.status === "已扫描").length;
+  const currentVersion = fileVersions.find((version) => version.id === selectedSourceVersionId);
 
   return (
     <div className={`app-shell ${assistantOpen ? "assistant-visible" : ""}`}>
@@ -480,7 +455,7 @@ export function App() {
           <div className="topbar-actions"><span className="saved-state"><Check size={14} />已保存</span><button className="icon-button" title="帮助" onClick={() => setShowHelp(true)}><CircleHelp size={18} /></button><button className="avatar-button" title="当前用户">CC</button></div>
         </header>
         <div className="workspace-scroll">
-          {!projectId ? <section className="workspace-card empty-workflow initial-workspace"><div className="empty-icon"><Plus size={23} /></div><h1>先创建一个项目</h1><p>项目用于汇总多个文件和版本；市场、Wave 与表头范围会在上传后由源文件证据识别。</p><button className="button primary" onClick={() => setShowProjectCreate(true)}><Plus size={16} />新建项目</button></section> : activeView === "overview" ? <>
+          {!projectId ? <section className="workspace-card empty-workflow initial-workspace"><div className="empty-icon"><Plus size={23} /></div><h1>先创建一个项目</h1><p>项目用于汇总多个文件和版本；市场、Wave 与表头范围会在上传后由源文件证据识别。</p><button className="button primary" onClick={() => setShowProjectCreate(true)}><Plus size={16} />新建项目</button></section> : activeView === "overview" ? (fileVersions.length === 0 ? <section className="workspace-card empty-workflow initial-workspace"><div className="empty-icon"><Upload size={23} /></div><h1>上传第一个文件</h1><p>当前项目还没有文件版本。上传后先由 Python 扫描，再由你手动启动 AI 识别。</p><button className="button primary" onClick={() => setShowUpload(true)}><Upload size={16} />上传文件</button></section> : <>
           <section className="page-header">
             <div><div className="eyebrow">CREATOR WORKSPACE · {projectName.toUpperCase()} / {marketScope.toUpperCase()} / {waveScope.toUpperCase()}</div><h1>项目概览</h1><p>查看上传版本、表格识别状态和当前需要处理的结构问题。</p></div>
             <div className="page-actions"><button className="button secondary" onClick={() => setShowUpload(true)}><Upload size={16} />上传新版本</button><button className="button primary" onClick={startRecognition}><Sparkles size={16} />开始识别</button></div>
@@ -489,10 +464,10 @@ export function App() {
           {projectError && <div className="upload-error page-error"><AlertTriangle size={14} />{projectError}</div>}
 
           <section className="summary-grid" aria-label="项目摘要">
-            <SummaryCard label="识别进度" value="86%" meta="23 / 27 张物理表" icon={<Gauge size={18} />} tone="yellow" />
-            <SummaryCard label="已验证表格" value="24" meta="较上次 +6" icon={<ShieldCheck size={18} />} tone="green" />
+            <SummaryCard label="已扫描文件" value={String(scannedVersionCount)} meta={`共 ${fileVersions.length} 个文件版本`} icon={<Gauge size={18} />} tone="yellow" />
+            <SummaryCard label="已验证表格" value={String(extractionTables.length)} meta="仅计入 Python 回读结果" icon={<ShieldCheck size={18} />} tone="green" />
             <SummaryCard label="待处理问题" value={String(openReviewIssues.length)} meta={openReviewIssues.length ? "由 Python 校验生成" : "当前没有阻断问题"} icon={<AlertTriangle size={18} />} tone="orange" />
-            <SummaryCard label="数据版本" value="Wave 1" meta="最后更新 16:42" icon={<FileSpreadsheet size={18} />} tone="neutral" />
+            <SummaryCard label="当前文件" value={currentVersion ? "已选择" : "未选择"} meta={currentVersion?.fileName || "请在文件列表选择版本"} icon={<FileSpreadsheet size={18} />} tone="neutral" />
           </section>
 
           <section className="notice-strip"><div className="notice-icon"><AlertTriangle size={17} /></div><div><strong>{openReviewIssues.some((issue) => issue.blocks_publication) ? "发布暂不可用" : "当前无发布阻断问题"}</strong><span>{openReviewIssues.length ? `还有 ${openReviewIssues.length} 个问题需要处理。` : "没有来自当前识别结果的待确认问题。"}</span></div><button className="text-button" onClick={() => setActiveView("review")}>打开 Review Summary <ArrowUpRight size={14} /></button></section>
@@ -507,7 +482,7 @@ export function App() {
               <div className="card-heading"><div><div className="section-kicker">SOURCE INVENTORY</div><h2>Sheet 与物理表</h2><p>按 Sheet 保存源位置；空 Sheet 或 Index 不会被强行识别为表。</p></div><button className="icon-button" title="重置筛选" onClick={() => { setQuery(""); setStatusFilter("全部状态"); }}><Filter size={17} /></button></div>
               <div className="table-toolbar"><label className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 Sheet 或来源类型" /></label><label className="filter-button"><Filter size={14} /><select aria-label="按状态筛选" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "全部状态" | Status)}><option>全部状态</option><option>已验证</option><option>需 Review</option><option>处理中</option><option>已扫描</option></select><ChevronDown size={14} /></label></div>
               <div className="sheet-table" role="table" aria-label="Sheet 列表"><div className="sheet-row sheet-head" role="row"><span>Sheet / 类型</span><span>物理表</span><span>范围</span><span>状态</span><span /></div>{filteredSheets.map((sheet) => <button key={sheet.name} className={`sheet-row ${selectedSheet === sheet.name ? "selected" : ""}`} onClick={() => setSelectedSheet(sheet.name)}><span className="sheet-name"><FileSpreadsheet size={16} /><span><strong>{sheet.name}</strong><small>{sheet.family}</small></span></span><span>{sheet.tables || "—"}</span><span className="mono-cell">{sheet.range}</span><span><StatusBadge status={sheet.status} /></span><ArrowUpRight size={15} /></button>)}</div>
-              <div className="card-footer"><span>共 {filteredSheets.length} 个 Sheet · {filteredSheets.reduce((total, sheet) => total + (sheet.tables || 0), 0)} 张已识别物理表</span><button className="text-button" onClick={() => setActiveView("explorer")}>查看全部 <ArrowUpRight size={14} /></button></div>
+              <div className="card-footer"><span>共 {filteredSheets.length} 个 Sheet · {recognizedTableCount} 张已识别物理表</span><button className="text-button" onClick={() => setActiveView("explorer")}>查看全部 <ArrowUpRight size={14} /></button></div>
             </div>
 
             <div className="workspace-card review-card">
@@ -519,9 +494,9 @@ export function App() {
 
           <section className="workspace-card explorer-card">
             <div className="card-heading"><div><div className="section-kicker">DATA EXPLORER · {selectedSheet.toUpperCase()}</div><h2>已验证表格预览</h2><p>展示值来自 Excel display value；解析值保留原始精度和 Source Lineage。</p></div><div className="preview-actions"><button className="button secondary" onClick={() => { setExplorerDetail("source"); setActiveView("explorer"); }}><BookOpen size={15} />原始来源</button><button className="button secondary" onClick={() => { setExplorerDetail("recognition"); setActiveView("explorer"); }}><PanelRight size={15} />识别详情</button></div></div>
-            {extractionTables.find((table) => table.source_sheet === selectedSheet) ? <ExtractedTablePreview table={extractionTables.find((item) => item.source_sheet === selectedSheet)!} /> : projectId === "prj_market-pulse" ? <><div className="table-meta"><span className="table-title-mark" /><div><strong>S1：请问您的性别是？</strong><span>Percentages_Sig1 · A12:AW18 · percentage</span></div><StatusBadge status="已验证" /><span className="meta-spacer" /><span className="lineage"><Database size={14} /> 来源坐标已保留</span></div><div className="data-preview" role="table" aria-label="表格预览"><div className="data-row data-head"><span>选项</span><span>Total (A)</span><span>Male (B)</span><span>Female (C)</span><span>来源</span></div>{tableRows.map((row) => <div className="data-row" key={row.label}><strong>{row.label}</strong><span>{row.total}</span><span>{row.male} {row.maleSig && <em className="sig-marker">{row.maleSig}</em>}</span><span>{row.female} {row.femaleSig && <em className="sig-marker">{row.femaleSig}</em>}</span><span className="mono-cell source-cell">{row.source}</span></div>)}</div><div className="table-note"><span><ShieldCheck size={14} />Python 已从源文件回读；AI 只提供结构建议</span><span><span className="legend-dot" />`-`、0 和不可用值保持区分</span></div></> : <div className="empty-workflow"><div className="empty-icon"><Database size={23} /></div><h2>当前 Sheet 尚无可展示的提取数据</h2><p>Python 已保存扫描和识别状态；通过边界校验后，真实 raw/display/parsed 数据会显示在这里。</p></div>}
+            {extractionTables.find((table) => table.source_sheet === selectedSheet) ? <ExtractedTablePreview table={extractionTables.find((item) => item.source_sheet === selectedSheet)!} /> : <div className="empty-workflow"><div className="empty-icon"><Database size={23} /></div><h2>当前 Sheet 尚无可展示的提取数据</h2><p>Python 已保存扫描和识别状态；通过边界校验后，真实 raw/display/parsed 数据会显示在这里。</p></div>}
           </section>
-          </> : <WorkflowPanel activeView={activeView} fileVersions={fileVersions} processingJob={processingJob} recognitionResult={recognitionResult} extractionTables={extractionTables} reviewIssues={reviewIssues} explorerDetail={explorerDetail} setExplorerDetail={setExplorerDetail} onResolveReviewIssue={resolveReviewIssue} setShowUpload={setShowUpload} selectedSheet={selectedSheet} setSelectedSheet={setSelectedSheet} setSelectedVersionDetails={setSelectedVersionDetails} query={query} setQuery={setQuery} statusFilter={statusFilter} setStatusFilter={setStatusFilter} />}
+          </>) : <WorkflowPanel activeView={activeView} fileVersions={fileVersions} processingJob={processingJob} recognitionResult={recognitionResult} extractionTables={extractionTables} reviewIssues={reviewIssues} explorerDetail={explorerDetail} setExplorerDetail={setExplorerDetail} onResolveReviewIssue={resolveReviewIssue} setShowUpload={setShowUpload} selectedSheet={selectedSheet} setSelectedSheet={setSelectedSheet} setSelectedVersionDetails={setSelectedVersionDetails} query={query} setQuery={setQuery} statusFilter={statusFilter} setStatusFilter={setStatusFilter} />}
         </div>
       </main>
 
@@ -577,7 +552,7 @@ function WorkflowPanel({ activeView, fileVersions, processingJob, recognitionRes
     const hasReview = validations.some((validation) => validation.outcome === "review_required" || validation.outcome === "rejected");
     return { name: sheet.sheet_name, family: "AI 识别", tables: proposals.length, status: (hasReview ? "需 Review" : "已验证") as Status, range: proposals[0]?.source_range || "未返回范围" };
   });
-  const explorerSheets = (recognizedSheets?.length ? recognizedSheets : sheets).filter((sheet) => {
+  const explorerSheets = (recognizedSheets ?? []).filter((sheet) => {
     const matchesQuery = `${sheet.name} ${sheet.family}`.toLowerCase().includes(query.toLowerCase());
     const matchesStatus = statusFilter === "全部状态" || sheet.status === statusFilter;
     return matchesQuery && matchesStatus;
