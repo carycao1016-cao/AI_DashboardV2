@@ -173,9 +173,13 @@ async def create_source_version(
 
 @router.get("/{project_id}/jobs/{job_id}")
 def get_job(project_id: str, job_id: str) -> dict[str, object]:
+    """返回轮询所需的轻量状态，完整识别结果由专用读取接口按需提供。"""
     job = get_processing_job(project_id, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="处理任务不存在")
+    # 识别结果可能包含数万真实单元格。轮询每秒调用一次，绝不能重复序列化和传输它。
+    result = job.pop("result", {})
+    job["result_available"] = bool(result)
     return {"success": True, "data": job}
 
 
