@@ -73,6 +73,48 @@ def initialize_database() -> None:
                 creator_note TEXT,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS semantic_models (
+                semantic_model_version_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(project_id),
+                source_file_version_id TEXT NOT NULL REFERENCES source_file_versions(source_file_version_id),
+                status TEXT NOT NULL,
+                model_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS dashboards (
+                dashboard_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(project_id),
+                dashboard_name TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS dashboard_versions (
+                dashboard_version_id TEXT PRIMARY KEY,
+                dashboard_id TEXT NOT NULL REFERENCES dashboards(dashboard_id),
+                project_id TEXT NOT NULL REFERENCES projects(project_id),
+                source_file_version_id TEXT NOT NULL REFERENCES source_file_versions(source_file_version_id),
+                semantic_model_version_id TEXT NOT NULL REFERENCES semantic_models(semantic_model_version_id),
+                revision INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                plan_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS dashboard_pages (
+                dashboard_page_id TEXT PRIMARY KEY,
+                dashboard_version_id TEXT NOT NULL REFERENCES dashboard_versions(dashboard_version_id),
+                category TEXT NOT NULL,
+                title TEXT NOT NULL,
+                sort_order INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS dashboard_visuals (
+                dashboard_visual_id TEXT PRIMARY KEY,
+                dashboard_page_id TEXT NOT NULL REFERENCES dashboard_pages(dashboard_page_id),
+                source_extracted_table_id TEXT NOT NULL,
+                visual_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                grid_span INTEGER NOT NULL,
+                review_status TEXT NOT NULL,
+                evidence_json TEXT NOT NULL
+            );
             """
         )
         # 兼容上一轮已创建的本地 SQLite 文件；正式环境由迁移工具管理。
@@ -259,6 +301,70 @@ def get_latest_processing_job(project_id: str, source_file_version_id: str, job_
             (project_id, source_file_version_id, job_type),
         ).fetchone()
     return get_processing_job(project_id, row["job_id"]) if row else None
+
+
+def save_dashboard_draft(
+    *,
+    project_id: str,
+    source_file_version_id: str,
+    semantic_model: dict[str, Any],
+    draft: dict[str, Any],
+) -> None:
+    """原子保存语义快照、Draft 版本、页面与视觉证据。"""
+    with connect() as connection:
+        connection.execute(
+            """INSERT INTO semantic_models(semantic_model_version_id, project_id, source_file_version_id, status, model_json)
+            VALUES (?, ?, ?, ?, ?)""",
+            (semantic_model["semantic_model_version_id"], project_id, source_file_version_id, "draft", json.dumps(semantic_model, ensure_ascii=False)),
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO dashboards(dashboard_id, project_id, dashboard_name) VALUES (?, ?, ?)",
+            (draft["dashboard_id"], project_id, draft["dashboard_name"]),
+        )
+        revision = connection.execute(
+            "SELECT COALESCE(MAX(revision), 0) + 1 AS next_revision FROM dashboard_versions WHERE dashboard_id = ?",
+            (draft["dashboard_id"],),
+        ).fetchone()["next_revision"]
+        draft["revision"] = revision
+        connection.execute(
+            """INSERT INTO dashboard_versions(
+                dashboard_version_id, dashboard_id, project_id, source_file_version_id,
+                semantic_model_version_id, revision, status, plan_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                draft["dashboard_version_id"], draft["dashboard_id"], project_id, source_file_version_id,
+                semantic_model["semantic_model_version_id"], revision, "draft", json.dumps(draft, ensure_ascii=False),
+            ),
+        )
+        for page in draft["pages"]:
+            connection.execute(
+                "INSERT INTO dashboard_pages(dashboard_page_id, dashboard_version_id, category, title, sort_order) VALUES (?, ?, ?, ?, ?)",
+                (page["dashboard_page_id"], draft["dashboard_version_id"], page["category"], page["title"], page["sort_order"]),
+            )
+            for visual in page["visuals"]:
+                connection.execute(
+                    """INSERT INTO dashboard_visuals(
+                        dashboard_visual_id, dashboard_page_id, source_extracted_table_id,
+                        visual_type, title, grid_span, review_status, evidence_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        visual["dashboard_visual_id"], page["dashboard_page_id"], visual["source_extracted_table_id"],
+                        visual["visual_type"], visual["title"], visual["grid_span"], visual["review_status"],
+                        json.dumps(visual["evidence"], ensure_ascii=False),
+                    ),
+                )
+
+
+def get_latest_dashboard_draft(project_id: str, source_file_version_id: str | None = None) -> dict[str, Any] | None:
+    query = "SELECT * FROM dashboard_versions WHERE project_id = ?"
+    parameters: list[str] = [project_id]
+    if source_file_version_id:
+        query += " AND source_file_version_id = ?"
+        parameters.append(source_file_version_id)
+    query += " ORDER BY created_at DESC, rowid DESC LIMIT 1"
+    with connect() as connection:
+        row = connection.execute(query, parameters).fetchone()
+    return json.loads(row["plan_json"]) if row else None
 
 
 def get_active_processing_job(project_id: str, source_file_version_id: str, job_type: str) -> dict[str, Any] | None:

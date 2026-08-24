@@ -17,6 +17,7 @@ import {
   MessageSquareText,
   MoreHorizontal,
   PanelRight,
+  Presentation,
   Plus,
   Search,
   Settings2,
@@ -26,9 +27,15 @@ import {
   X,
 } from "lucide-react";
 import { uiConfig } from "./config";
+import { use as useECharts, init as initECharts } from "echarts/core";
+import { BarChart, FunnelChart, HeatmapChart, LineChart, PieChart, RadarChart, ScatterChart } from "echarts/charts";
+import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
+import { CanvasRenderer } from "echarts/renderers";
+
+useECharts([BarChart, FunnelChart, HeatmapChart, LineChart, PieChart, RadarChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent, CanvasRenderer]);
 
 type Status = "已验证" | "需 Review" | "处理中" | "已扫描";
-type WorkflowView = "overview" | "versions" | "processing" | "review" | "explorer" | "dashboard";
+type WorkflowView = "overview" | "versions" | "processing" | "review" | "explorer" | "dashboard" | "dashboard_preview";
 type ExplorerDetail = "none" | "source" | "recognition";
 
 type FileVersion = {
@@ -100,6 +107,11 @@ type ExtractedTable = {
   rows: Array<{ extracted_row_id: string; original_label: string; detected_row_type: string; cells: ExtractedCell[] }>;
 };
 
+type ExtractedTableSummary = Pick<ExtractedTable, "extracted_table_id" | "source_sheet" | "source_range" | "detected_question_number" | "detected_question_text" | "detected_table_title" | "table_variant"> & {
+  header_count: number;
+  row_count: number;
+};
+
 type ProcessingJob = {
   job_id: string;
   source_file_version_id: string;
@@ -123,6 +135,38 @@ type ReviewIssue = {
   blocks_publication: boolean;
 };
 
+type DashboardVisual = {
+  dashboard_visual_id: string;
+  source_extracted_table_id: string;
+  visual_type: string;
+  display_precision?: number;
+  title: string;
+  grid_span: number;
+  review_status: string;
+  evidence: { source_ranges?: string[] };
+};
+
+type DashboardDraft = {
+  dashboard_version_id: string;
+  dashboard_name: string;
+  project_id: string;
+  source_file_version_id: string;
+  template: string;
+  revision?: number;
+  pages: Array<{ dashboard_page_id: string; category: "core" | "suggested" | "appendix" | "internal"; title: string; sort_order: number; visuals: DashboardVisual[] }>;
+  summary: { tables_detected: number; semantic_questions: number; tables_in_draft: number; blocking_issues: number; review_required: number };
+  warnings: string[];
+  semantic_questions?: Array<{ semantic_question_id: string; source_extracted_table_ids: string[]; title: string; module_name: string; metric_type: string; metric_source?: string; review_status: string; ai_recommended?: boolean; included_in_draft?: boolean; recommended_visual?: string; planning_source?: string; planning_confidence?: number; planning_reason?: string; template_matches?: Array<{ template: string; reason: string }>; evidence: { source_ranges?: string[] } }>;
+};
+
+type DashboardDraftOptions = {
+  template?: string;
+  selectedTableIds?: string[];
+  metricConfirmations?: Record<string, string>;
+  visualOverrides?: Record<string, string>;
+  planningMode?: "ai_refresh" | "python_only";
+};
+
 const workflow = [
   { id: "overview" as WorkflowView, label: "项目概览", icon: LayoutDashboard, state: "complete" },
   { id: "versions" as WorkflowView, label: "文件与版本", icon: FileSpreadsheet, state: "complete" },
@@ -130,6 +174,7 @@ const workflow = [
   { id: "review" as WorkflowView, label: "Review Summary", icon: ShieldCheck, state: "warning" },
   { id: "explorer" as WorkflowView, label: "Data Explorer", icon: Database, state: "complete" },
   { id: "dashboard" as WorkflowView, label: "Dashboard Draft", icon: BarChart3, state: "not_started" },
+  { id: "dashboard_preview" as WorkflowView, label: "Dashboard Preview", icon: Presentation, state: "not_started" },
 ];
 
 function StatusBadge({ status }: { status: Status }) {
@@ -168,7 +213,13 @@ export function App() {
   const [processingJob, setProcessingJob] = useState<ProcessingJob | null>(null);
   const [recognitionResult, setRecognitionResult] = useState<RecognitionResult | null>(null);
   const [extractionTables, setExtractionTables] = useState<ExtractedTable[]>([]);
+  const [tableDirectory, setTableDirectory] = useState<ExtractedTableSummary[]>([]);
+  const [tableDirectoryTotal, setTableDirectoryTotal] = useState(0);
+  const [tableDirectoryPage, setTableDirectoryPage] = useState(1);
+  const [loadingTableId, setLoadingTableId] = useState("");
   const [reviewIssues, setReviewIssues] = useState<ReviewIssue[]>([]);
+  const [dashboardDraft, setDashboardDraft] = useState<DashboardDraft | null>(null);
+  const [dashboardGenerating, setDashboardGenerating] = useState(false);
   const [activeView, setActiveView] = useState<WorkflowView>("overview");
   const [explorerDetail, setExplorerDetail] = useState<ExplorerDetail>("none");
   const [showHelp, setShowHelp] = useState(false);
@@ -187,6 +238,31 @@ export function App() {
       status: version.scan_status === "completed" ? "已扫描" : "处理中",
       relation: version.upload_mode === "replace" ? `替换 ${version.replaces_source_file_version_id || "历史版本"}` : "新增文件",
     })));
+  };
+
+  const loadTableDirectory = async (id: string, sourceVersionId: string, page = 1) => {
+    const response = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/source-versions/${sourceVersionId}/extraction-tables?page=${page}&page_size=20`);
+    if (!response.ok) {
+      setTableDirectory([]);
+      setTableDirectoryTotal(0);
+      return;
+    }
+    const payload = await response.json();
+    if (!payload.success) throw new Error(payload.detail || "读取物理表目录失败");
+    setTableDirectory(payload.data.tables as ExtractedTableSummary[]);
+    setTableDirectoryTotal(payload.data.total as number);
+    setTableDirectoryPage(payload.data.page as number);
+  };
+
+  const loadDashboardDraft = async (id: string, sourceVersionId: string) => {
+    const response = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/dashboard-drafts/latest?source_file_version_id=${encodeURIComponent(sourceVersionId)}`);
+    if (response.status === 404) {
+      setDashboardDraft(null);
+      return;
+    }
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.detail || "读取 Dashboard Draft 失败");
+    setDashboardDraft(payload.data as DashboardDraft);
   };
 
   const loadProject = async (id: string, requestedSourceVersionId?: string) => {
@@ -209,6 +285,9 @@ export function App() {
     if (!selectedVersion || selectedVersion.scan_status !== "completed") {
       setRecognitionResult(null);
       setExtractionTables([]);
+      setTableDirectory([]);
+      setTableDirectoryTotal(0);
+      setDashboardDraft(null);
       return;
     }
     const recognitionResponse = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/source-versions/${selectedVersion.source_file_version_id}/recognition-results`);
@@ -230,13 +309,48 @@ export function App() {
       });
       if (recognition.status === "failed") setProjectError(recognition.error_message || "AI 识别失败");
     }
-    const extractionResponse = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/source-versions/${selectedVersion.source_file_version_id}/extraction`);
-    if (!extractionResponse.ok) {
+    setExtractionTables([]);
+    await loadTableDirectory(id, selectedVersion.source_file_version_id);
+    await loadDashboardDraft(id, selectedVersion.source_file_version_id);
+  };
+
+  const generateDashboardDraft = async (options: DashboardDraftOptions = {}) => {
+    if (!projectId || !selectedSourceVersionId) return;
+    setDashboardGenerating(true);
+    setProjectError("");
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 45_000);
+    try {
+      const response = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${projectId}/source-versions/${selectedSourceVersionId}/dashboard-drafts`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ metric_confirmations: options.metricConfirmations ?? {}, template: options.template, selected_table_ids: options.selectedTableIds, visual_overrides: options.visualOverrides ?? {}, planning_mode: options.planningMode ?? "ai_refresh" }) });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.detail || "生成 Dashboard Draft 失败");
+      setDashboardDraft(payload.data as DashboardDraft);
+      setActiveView("dashboard");
+    } catch (error) {
+      setProjectError(error instanceof DOMException && error.name === "AbortError" ? "更新 Draft 超时，已自动停止等待；原有 Draft 保持不变，请稍后重试。" : error instanceof Error ? error.message : "生成 Dashboard Draft 失败");
+    } finally {
+      window.clearTimeout(timeoutId);
+      setDashboardGenerating(false);
+    }
+  };
+
+  const openExtractedTable = async (tableId: string) => {
+    if (!projectId || !selectedSourceVersionId) return;
+    if (extractionTables[0]?.extracted_table_id === tableId) {
       setExtractionTables([]);
       return;
     }
-    const extractionPayload = await extractionResponse.json();
-    setExtractionTables(extractionPayload.success ? (extractionPayload.data.tables as ExtractedTable[]) : []);
+    setLoadingTableId(tableId);
+    try {
+      const response = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${projectId}/source-versions/${selectedSourceVersionId}/extraction-tables/${encodeURIComponent(tableId)}`);
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.detail || "读取表格明细失败");
+      setExtractionTables([payload.data.table as ExtractedTable]);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : "读取表格明细失败");
+    } finally {
+      setLoadingTableId("");
+    }
   };
 
   const loadProjects = async () => {
@@ -337,8 +451,9 @@ export function App() {
       if (!response.ok || !payload.success) throw new Error(payload.detail || "读取识别任务失败");
       const job = payload.data as ProcessingJob;
       setProcessingJob(job);
-      await loadProject(id, job.source_file_version_id);
       if (job.status === "completed" || job.status === "failed") {
+        // 任务执行中只轮询轻量状态；完成后再按需读取完整识别结果和提取数据。
+        await loadProject(id, job.source_file_version_id);
         if (job.status === "failed") setProjectError(job.error_message || "Workbook 扫描失败");
         return;
       }
@@ -486,7 +601,7 @@ export function App() {
 
           <section className="summary-grid" aria-label="项目摘要">
             <SummaryCard label="已扫描文件" value={String(scannedVersionCount)} meta={`共 ${fileVersions.length} 个文件版本`} icon={<Gauge size={18} />} tone="yellow" />
-            <SummaryCard label="已验证表格" value={String(extractionTables.length)} meta="仅计入 Python 回读结果" icon={<ShieldCheck size={18} />} tone="green" />
+            <SummaryCard label="已验证表格" value={String(tableDirectoryTotal)} meta="仅计入 Python 回读结果" icon={<ShieldCheck size={18} />} tone="green" />
             <SummaryCard label="待处理问题" value={String(openReviewIssues.length)} meta={openReviewIssues.length ? "由 Python 校验生成" : "当前没有阻断问题"} icon={<AlertTriangle size={18} />} tone="orange" />
             <SummaryCard label="当前文件" value={currentVersion ? "已选择" : "未选择"} meta={currentVersion?.fileName || "请在文件列表选择版本"} icon={<FileSpreadsheet size={18} />} tone="neutral" />
           </section>
@@ -513,11 +628,11 @@ export function App() {
             </div>
           </section>
 
-          <section className="workspace-card explorer-card">
-            <div className="card-heading"><div><div className="section-kicker">DATA EXPLORER · {selectedSheet.toUpperCase()}</div><h2>已验证表格预览</h2><p>展示值来自 Excel display value；解析值保留原始精度和 Source Lineage。</p></div><div className="preview-actions"><button className="button secondary" onClick={() => { setExplorerDetail("source"); setActiveView("explorer"); }}><BookOpen size={15} />原始来源</button><button className="button secondary" onClick={() => { setExplorerDetail("recognition"); setActiveView("explorer"); }}><PanelRight size={15} />识别详情</button></div></div>
-            {extractionTables.find((table) => table.source_sheet === selectedSheet) ? <ExtractedTablePreview table={extractionTables.find((item) => item.source_sheet === selectedSheet)!} /> : <div className="empty-workflow"><div className="empty-icon"><Database size={23} /></div><h2>当前 Sheet 尚无可展示的提取数据</h2><p>Python 已保存扫描和识别状态；通过边界校验后，真实 raw/display/parsed 数据会显示在这里。</p></div>}
+          <section className="workspace-card explorer-entry-card">
+            <div><div className="section-kicker">DATA EXPLORER</div><h2>{tableDirectoryTotal ? `${tableDirectoryTotal} 张已验证表格` : "尚无已验证表格"}</h2><p>按物理表浏览已通过 Python 回读校验的数据。</p></div>
+            <button className="button secondary" onClick={() => setActiveView("explorer")}><Database size={15} />打开 Data Explorer</button>
           </section>
-          </>) : <WorkflowPanel activeView={activeView} fileVersions={fileVersions} processingJob={processingJob} recognitionResult={recognitionResult} extractionTables={extractionTables} reviewIssues={reviewIssues} explorerDetail={explorerDetail} setExplorerDetail={setExplorerDetail} onResolveReviewIssue={resolveReviewIssue} setShowUpload={setShowUpload} selectedSheet={selectedSheet} setSelectedSheet={setSelectedSheet} setSelectedVersionDetails={setSelectedVersionDetails} query={query} setQuery={setQuery} statusFilter={statusFilter} setStatusFilter={setStatusFilter} onRefresh={refreshCurrentProject} />}
+          </>) : <WorkflowPanel activeView={activeView} fileVersions={fileVersions} processingJob={processingJob} recognitionResult={recognitionResult} extractionTables={extractionTables} tableDirectory={tableDirectory} tableDirectoryTotal={tableDirectoryTotal} tableDirectoryPage={tableDirectoryPage} loadingTableId={loadingTableId} onOpenTable={openExtractedTable} onChangeTablePage={(page) => void loadTableDirectory(projectId, selectedSourceVersionId, page).catch((error: Error) => setProjectError(error.message))} dashboardDraft={dashboardDraft} dashboardGenerating={dashboardGenerating} onGenerateDraft={generateDashboardDraft} reviewIssues={reviewIssues} explorerDetail={explorerDetail} setExplorerDetail={setExplorerDetail} onResolveReviewIssue={resolveReviewIssue} setShowUpload={setShowUpload} selectedSheet={selectedSheet} setSelectedSheet={setSelectedSheet} setSelectedVersionDetails={setSelectedVersionDetails} query={query} setQuery={setQuery} statusFilter={statusFilter} setStatusFilter={setStatusFilter} onRefresh={refreshCurrentProject} />}
         </div>
       </main>
 
@@ -558,13 +673,164 @@ function ReviewIssueList({ issues, onResolve, compact = false }: { issues: Revie
   return <div className="issue-list">{issues.map((issue, index) => <div className="issue-row" key={issue.review_issue_id}><span className="issue-number warning">{String(index + 1).padStart(2, "0")}</span><div><strong>{issue.message}</strong><span>{issue.object_type} · {issue.object_id} · {issue.severity}</span></div><span className="issue-status warning"><AlertTriangle size={12} />{issue.status === "open" ? "需确认" : issue.status}</span>{!compact && <div className="review-action"><input value={notes[issue.review_issue_id] ?? ""} onChange={(event) => setNotes((current) => ({ ...current, [issue.review_issue_id]: event.target.value }))} placeholder="处理备注（可选）" /><button className="button secondary" onClick={() => onResolve(issue, notes[issue.review_issue_id] ?? "")}>确认已处理</button></div>}</div>)}</div>;
 }
 
-function WorkflowPanel({ activeView, fileVersions, processingJob, recognitionResult, extractionTables, reviewIssues, explorerDetail, setExplorerDetail, onResolveReviewIssue, setShowUpload, selectedSheet, setSelectedSheet, setSelectedVersionDetails, query, setQuery, statusFilter, setStatusFilter, onRefresh }: { activeView: Exclude<WorkflowView, "overview">; fileVersions: FileVersion[]; processingJob: ProcessingJob | null; recognitionResult: RecognitionResult | null; extractionTables: ExtractedTable[]; reviewIssues: ReviewIssue[]; explorerDetail: ExplorerDetail; setExplorerDetail: (detail: ExplorerDetail) => void; onResolveReviewIssue: (issue: ReviewIssue, creatorNote?: string) => void; setShowUpload: (open: boolean) => void; selectedSheet: string; setSelectedSheet: (sheet: string) => void; setSelectedVersionDetails: (version: FileVersion) => void; query: string; setQuery: (value: string) => void; statusFilter: "全部状态" | Status; setStatusFilter: (value: "全部状态" | Status) => void; onRefresh: () => void }) {
+function PhysicalTableExplorer({ tables, total, page, selectedTable, loadingTableId, onOpenTable, onChangePage }: { tables: ExtractedTableSummary[]; total: number; page: number; selectedTable: ExtractedTable | null; loadingTableId: string; onOpenTable: (tableId: string) => void; onChangePage: (page: number) => void }) {
+  const pageCount = Math.max(1, Math.ceil(total / 20));
+  return <section className="standalone-view">
+    <div className="page-header"><div><div className="eyebrow">DATA EXPLORER · CREATOR WORKSPACE</div><h1>物理表目录</h1><p>每项代表源文件中可独立阅读的一张表。</p></div></div>
+    <div className="workspace-card standalone-card table-directory-card">
+      <div className="directory-explainer"><Database size={18} /><div><strong>这里显示什么？</strong><span>“物理表”是 Excel 中一个连续的题目、表头和数据区域，不等同于整个 Sheet。</span></div></div>
+      {tables.length === 0 ? <div className="empty-workflow"><div className="empty-icon"><Database size={23} /></div><h2>当前没有可读取的物理表</h2><p>完成 AI 识别并通过 Python 边界校验后，目录会显示在这里。</p></div> : <>
+        <div className="physical-table-list" role="table" aria-label="物理表目录">
+          <div className="physical-table-row physical-table-head" role="row"><span>表格</span><span>来源位置</span><span>规模</span><span /></div>
+          {tables.map((table) => {
+            const isExpanded = selectedTable?.extracted_table_id === table.extracted_table_id;
+            return <div key={table.extracted_table_id} className={isExpanded ? "physical-table-item expanded" : "physical-table-item"}>
+              <button className="physical-table-row" onClick={() => onOpenTable(table.extracted_table_id)} aria-expanded={isExpanded} disabled={loadingTableId === table.extracted_table_id}>
+                <span><strong>{table.detected_question_number || table.detected_table_title || "未命名表格"}</strong><small>{table.detected_question_text || table.table_variant || "已通过 Python 校验"}</small></span>
+                <span className="source-location"><strong>{table.source_sheet}</strong><small>{table.source_range}</small></span>
+                <span>{table.row_count} 行 · {table.header_count} 列</span>
+                <span className="table-disclosure"><ChevronDown size={17} /></span>
+              </button>
+              {isExpanded && <div className="physical-table-detail"><div className="section-kicker">TABLE DETAIL</div><ExtractedTablePreview table={selectedTable} /></div>}
+            </div>;
+          })}
+        </div>
+        <div className="directory-pagination"><span>共 {total} 张表 · 第 {page} / {pageCount} 页</span><div><button className="icon-button" title="上一页" disabled={page <= 1} onClick={() => onChangePage(page - 1)}><ChevronDown size={16} className="page-prev" /></button><button className="icon-button" title="下一页" disabled={page >= pageCount} onClick={() => onChangePage(page + 1)}><ChevronDown size={16} className="page-next" /></button></div></div>
+      </>}
+    </div>
+  </section>;
+}
+
+function LegacyDashboardDraftWorkspace({ draft, generating, onGenerate }: { draft: DashboardDraft | null; generating: boolean; onGenerate: (metricConfirmations?: Record<string, string>) => void }) {
+  const [selectedPageId, setSelectedPageId] = useState("");
+  const [metricConfirmations, setMetricConfirmations] = useState<Record<string, string>>({});
+  const selectedPage = draft?.pages.find((page) => page.dashboard_page_id === selectedPageId) ?? draft?.pages[0];
+  if (!draft) {
+    return <section className="standalone-view"><div className="page-header"><div><div className="eyebrow">DASHBOARD DRAFT · CREATOR WORKSPACE</div><h1>生成 Dashboard Draft</h1><p>仅使用已通过 Python 校验的物理表创建内部 Draft；不会发布或修改源数据。</p></div><button className="button primary" onClick={() => onGenerate()} disabled={generating}><Sparkles size={16} />{generating ? "生成中" : "生成 Dashboard Draft"}</button></div><div className="workspace-card empty-workflow"><div className="empty-icon"><BarChart3 size={23} /></div><h2>尚未生成 Draft</h2><p>Draft 会先建立语义快照和页面计划，再由 Creator 确认指标、图表与展示范围。</p></div></section>;
+  }
+  const categories: Array<[DashboardDraft["pages"][number]["category"], string]> = [["core", "Core Pages"], ["suggested", "Suggested Pages"], ["appendix", "Appendix"], ["internal", "Internal"]];
+  const semanticQuestions = draft.semantic_questions ?? [];
+  return <section className="standalone-view dashboard-workspace"><div className="page-header"><div><div className="eyebrow">DASHBOARD DRAFT · {draft.template.toUpperCase()}</div><h1>{draft.dashboard_name}</h1><p>Draft v{draft.revision ?? 1} · {draft.summary.tables_in_draft} 张表已进入规划，{draft.summary.review_required} 项仍需确认。</p></div><button className="button secondary" onClick={() => onGenerate(metricConfirmations)} disabled={generating}><Sparkles size={15} />{generating ? "生成中" : "保存为新 Draft 版本"}</button></div><section className="summary-grid" aria-label="Dashboard Draft 摘要"><SummaryCard label="识别表格" value={String(draft.summary.tables_detected)} meta="当前文件版本" icon={<Database size={18} />} tone="neutral" /><SummaryCard label="语义问题" value={String(draft.summary.semantic_questions)} meta="严格关联后保留" icon={<ShieldCheck size={18} />} tone="green" /><SummaryCard label="Draft 内容" value={String(draft.summary.tables_in_draft)} meta="未包含发布数据" icon={<BarChart3 size={18} />} tone="yellow" /><SummaryCard label="需确认" value={String(draft.summary.review_required)} meta="指标尚未确认" icon={<AlertTriangle size={18} />} tone="orange" /></section>{draft.warnings.map((warning) => <div className="notice-strip dashboard-warning" key={warning}><div className="notice-icon"><AlertTriangle size={17} /></div><span>{warning}</span></div>)}<div className="dashboard-builder"><aside className="dashboard-page-panel">{categories.map(([category, label]) => { const pages = draft.pages.filter((page) => page.category === category); return pages.length ? <div key={category}><div className="section-kicker">{label}</div>{pages.map((page) => <button key={page.dashboard_page_id} className={`dashboard-page-item ${selectedPage?.dashboard_page_id === page.dashboard_page_id ? "selected" : ""}`} onClick={() => setSelectedPageId(page.dashboard_page_id)}><span>{page.title}</span><small>{page.visuals.length}</small></button>)}</div> : null; })}</aside><section className="dashboard-canvas"><div className="card-heading"><div><div className="section-kicker">{selectedPage?.category ?? "DRAFT"}</div><h2>{selectedPage?.title ?? "暂无页面"}</h2></div><span className="status-badge status-warning"><AlertTriangle size={12} />内部 Draft</span></div>{selectedPage?.visuals.length ? <div className="draft-visual-grid">{selectedPage.visuals.map((visual) => <article className="draft-visual" key={visual.dashboard_visual_id}><div><div className="section-kicker">{visual.visual_type === "data_table" ? "DATA TABLE" : visual.visual_type}</div><h3>{visual.title}</h3></div><span className={`status-badge ${visual.review_status === "creator_confirmed" ? "status-success" : "status-warning"}`}>{visual.review_status === "creator_confirmed" ? "已确认指标" : "待确认指标"}</span><div className="draft-visual-evidence"><Database size={14} /><span>{visual.evidence.source_ranges?.join(" · ") || visual.source_extracted_table_id}</span></div></article>)}</div> : <div className="empty-workflow"><div className="empty-icon"><BarChart3 size={23} /></div><h2>当前页面没有可展示内容</h2><p>技术表和未确认内容不会自动进入 Creator 可见页面。</p></div>}</section></div><section className="workspace-card semantic-review-card"><div className="card-heading"><div><div className="section-kicker">SEMANTIC REVIEW</div><h2>确认指标类型</h2><p>确认后会创建新 Draft 版本；源表与现有 Draft 保持不变。</p></div></div>{semanticQuestions.length ? <div className="semantic-review-list">{semanticQuestions.map((question) => { const tableId = question.source_extracted_table_ids[0]; const value = metricConfirmations[tableId] ?? question.metric_type; return <label key={question.semantic_question_id}><span><strong>{question.title}</strong><small>{question.module_name} · {question.evidence.source_ranges?.join(" · ")}</small></span><select value={value} onChange={(event) => setMetricConfirmations((current) => ({ ...current, [tableId]: event.target.value }))}><option value="unknown">待确认</option><option value="percentage">百分比</option><option value="count">样本数</option><option value="mean">均值</option><option value="net">Net</option><option value="box_score">Box Score</option></select></label>; })}</div> : <p className="empty-state-copy">此历史 Draft 不含可确认的语义快照。保存为新版本后即可继续确认。</p>}</section></section>;
+}
+
+function DashboardDraftWorkspace({ draft, generating, onGenerate, visualOverrides, onVisualChange }: { draft: DashboardDraft | null; generating: boolean; onGenerate: (options?: DashboardDraftOptions) => void; visualOverrides: Record<string, string>; onVisualChange: (tableId: string, visual: string) => void }) {
+  const [selectedPageId, setSelectedPageId] = useState("");
+  const [selectedTableIds, setSelectedTableIds] = useState<Set<string>>(new Set());
+  const semanticQuestions = draft?.semantic_questions ?? [];
+  useEffect(() => {
+    if (!draft) return;
+    const visualIds = new Set(draft.pages.flatMap((page) => page.visuals.map((visual) => visual.source_extracted_table_id)));
+    setSelectedTableIds(new Set(semanticQuestions.filter((question) => question.included_in_draft ?? visualIds.has(question.source_extracted_table_ids[0])).map((question) => question.source_extracted_table_ids[0])));
+  }, [draft?.dashboard_version_id]);
+  if (!draft) return <section className="standalone-view"><div className="page-header"><div><div className="eyebrow">DASHBOARD DRAFT · CREATOR WORKSPACE</div><h1>AI 推荐 Dashboard Draft</h1><p>系统会选择合适模板、核心内容和图表类型，再生成可直接浏览的 Draft。</p></div><button className="button primary" onClick={() => onGenerate()} disabled={generating}><Sparkles size={16} />{generating ? "生成中" : "生成 AI 推荐 Draft"}</button></div></section>;
+  const categories: Array<[DashboardDraft["pages"][number]["category"], string]> = [["core", "Core Pages"], ["suggested", "Suggested Pages"], ["appendix", "Appendix"], ["internal", "Internal"]];
+  const selectedPage = draft.pages.find((page) => page.dashboard_page_id === selectedPageId) ?? draft.pages[0];
+  const setRecommendedScope = () => setSelectedTableIds(new Set(semanticQuestions.filter((question) => question.ai_recommended).map((question) => question.source_extracted_table_ids[0])));
+  const toggleTable = (tableId: string) => setSelectedTableIds((current) => { const next = new Set(current); if (next.has(tableId)) next.delete(tableId); else next.add(tableId); return next; });
+  const saveScopeDraft = () => onGenerate({ selectedTableIds: [...selectedTableIds], visualOverrides, planningMode: "ai_refresh" });
+  const saveGraphDraft = () => onGenerate({ selectedTableIds: [...selectedTableIds], visualOverrides, planningMode: "python_only" });
+  const matchedTemplates = Array.from(new Set(semanticQuestions.flatMap((question) => (question.template_matches ?? []).map((match) => match.template))));
+  return <><section className="standalone-view dashboard-workspace"><div className="page-header"><div><div className="eyebrow">DASHBOARD DRAFT · {draft.template.toUpperCase()}</div><h1>{draft.dashboard_name}</h1><p>Draft v{draft.revision ?? 1} · AI 已纳入 {draft.summary.tables_in_draft} 张表；当前可选择 {selectedTableIds.size} 张。</p></div><button className="button secondary" onClick={saveScopeDraft} disabled={generating}><Sparkles size={15} />{generating ? "生成中" : "更新 Draft"}</button></div><section className="summary-grid" aria-label="Dashboard Draft 摘要"><SummaryCard label="识别表格" value={String(draft.summary.tables_detected)} meta="当前文件版本" icon={<Database size={18} />} tone="neutral" /><SummaryCard label="AI 纳入" value={String(draft.summary.tables_in_draft)} meta="可直接浏览" icon={<Sparkles size={18} />} tone="green" /><SummaryCard label="当前选择" value={String(selectedTableIds.size)} meta="保存后生成新版本" icon={<Check size={18} />} tone="yellow" /><SummaryCard label="低置信提示" value={String(draft.summary.review_required)} meta="不会阻止浏览 Draft" icon={<AlertTriangle size={18} />} tone="orange" /></section><div className="dashboard-builder"><aside className="dashboard-page-panel">{categories.map(([category, label]) => { const pages = draft.pages.filter((page) => page.category === category); return pages.length ? <div key={category}><div className="section-kicker">{label}</div>{pages.map((page) => <button key={page.dashboard_page_id} className={`dashboard-page-item ${selectedPage?.dashboard_page_id === page.dashboard_page_id ? "selected" : ""}`} onClick={() => setSelectedPageId(page.dashboard_page_id)}><span>{page.title}</span><small>{page.visuals.length}</small></button>)}</div> : null; })}</aside><section className="dashboard-canvas"><div className="card-heading"><div><div className="section-kicker">{selectedPage?.category ?? "DRAFT"}</div><h2>{selectedPage?.title ?? "暂无页面"}</h2></div><span className="status-badge status-success"><Sparkles size={12} />AI 推荐</span></div>{selectedPage?.visuals.length ? <div className="draft-visual-grid">{selectedPage.visuals.map((visual) => <article className="draft-visual" key={visual.dashboard_visual_id}><div><div className="section-kicker">{visual.visual_type === "data_table" ? "DATA TABLE" : visual.visual_type}</div><h3>{visual.title}</h3></div><span className={`status-badge ${visual.review_status === "review_required" ? "status-warning" : "status-success"}`}>{visual.review_status === "review_required" ? "保守展示" : "AI 推荐图表"}</span><div className="draft-visual-evidence"><Database size={14} /><span>{visual.evidence.source_ranges?.join(" · ") || visual.source_extracted_table_id}</span></div></article>)}</div> : <div className="empty-workflow"><div className="empty-icon"><BarChart3 size={23} /></div><h2>当前范围没有纳入内容</h2><p>请在下方选择要加入 Draft 的表格。</p></div>}</section></div><section className="workspace-card draft-setup-card"><div className="card-heading"><div><div className="section-kicker">DRAFT SETUP</div><h2>1. 选择内容范围</h2><p>AI 已按题目语义匹配模板并预选核心内容。选择完成后，在本区底部保存。</p></div><button className="text-button" onClick={setRecommendedScope}>恢复 AI 推荐</button></div><div className="template-match-summary"><Sparkles size={15} /><span>AI 匹配模板：{matchedTemplates.length ? matchedTemplates.join("、") : "暂无明确模板"}</span></div><div className="content-selection-list">{semanticQuestions.map((question) => { const tableId = question.source_extracted_table_ids[0]; return <label key={question.semantic_question_id} className={selectedTableIds.has(tableId) ? "selected" : ""}><input type="checkbox" checked={selectedTableIds.has(tableId)} onChange={() => toggleTable(tableId)} /><span><strong>{question.title}</strong><small>{question.module_name} · {question.evidence.source_ranges?.join(" · ")}</small></span>{question.ai_recommended && <em>AI 推荐</em>}</label>; })}</div><div className="draft-action-bar"><span>已选择 {selectedTableIds.size} 项 · 图形修改会随新 Draft 版本保存</span><button className="button primary" onClick={saveScopeDraft} disabled={generating}><Sparkles size={15} />{generating ? "正在更新" : "2. 保存并更新 Draft"}</button></div></section></section><PlanningReviewPanel draft={draft} visualOverrides={visualOverrides} onVisualChange={onVisualChange} onSave={saveGraphDraft} generating={generating} /></>;
+}
+
+function DashboardPreviewWorkspace({ draft }: { draft: DashboardDraft | null }) {
+  if (!draft) return <section className="standalone-view"><div className="page-header"><div><div className="eyebrow">DASHBOARD PREVIEW</div><h1>尚未生成 Dashboard Draft</h1><p>先在 Dashboard Draft 中完成 AI 规划和内容范围选择。</p></div></div></section>;
+  return <section className="standalone-view dashboard-preview-workspace"><div className="page-header"><div><div className="eyebrow">DASHBOARD PREVIEW · DRAFT V{draft.revision ?? 1}</div><h1>{draft.dashboard_name}</h1><p>这里集中查看所有已纳入 Draft 的页面和图表；修改题目或图形请返回左侧 Dashboard Draft。</p></div><span className="status-badge status-success"><ShieldCheck size={12} />已验证数据</span></div>{draft.pages.map((page) => <section className="dashboard-preview-page" key={page.dashboard_page_id}><div className="card-heading"><div><div className="section-kicker">{page.category.toUpperCase()}</div><h2>{page.title}</h2></div><span className="status-badge status-info">{page.visuals.length} 个图表</span></div><div className="dashboard-data-grid">{page.visuals.map((visual) => <DashboardDataPreviewItem key={visual.dashboard_visual_id} draft={draft} visual={visual} />)}</div></section>)}</section>;
+}
+
+function DashboardDataPreview({ draft }: { draft: DashboardDraft | null }) {
+  const corePage = draft?.pages.find((page) => page.category === "core") ?? draft?.pages[0];
+  if (!draft || !corePage?.visuals.length) return null;
+  return <section className="dashboard-data-preview"><div className="card-heading"><div><div className="section-kicker">VALIDATED DATA PREVIEW</div><h2>{corePage.title}</h2><p>仅读取当前 Core 页已纳入的物理表；数值与 Base 保持原始提取结果。</p></div></div><div className="dashboard-data-grid">{corePage.visuals.map((visual) => <DashboardDataPreviewItem key={visual.dashboard_visual_id} draft={draft} visual={visual} />)}</div></section>;
+}
+
+const visualChoices = [
+  ["bar", "柱状图"], ["horizontal_bar", "横向条形图"], ["grouped_bar", "分组条形图"], ["line", "趋势折线图"],
+  ["funnel", "漏斗图"], ["pyramid", "金字塔图"], ["heatmap", "热力图"], ["pie", "饼图"],
+  ["donut", "环形图"], ["radar", "雷达图"], ["scatter", "散点图"], ["data_table", "数据表"],
+] as const;
+
+function PlanningReviewPanel({ draft, visualOverrides, onVisualChange, onSave, generating }: { draft: DashboardDraft | null; visualOverrides: Record<string, string>; onVisualChange: (tableId: string, visual: string) => void; onSave: () => void; generating: boolean }) {
+  const questions = (draft?.semantic_questions ?? []).filter((question) => question.included_in_draft);
+  if (!questions.length) return null;
+  return <section className="workspace-card planning-review-card"><div className="card-heading"><div><div className="section-kicker">AI PLANNING REVIEW</div><h2>2. 检查题目与图形</h2><p>修改图形后，请在这里保存；保存成功后到左侧 Dashboard Preview 查看新结果。</p></div><button className="button primary" onClick={onSave} disabled={generating}><Sparkles size={15} />{generating ? "正在更新" : "保存图形并更新 Draft"}</button></div><div className="planning-review-list">{questions.map((question) => { const tableId = question.source_extracted_table_ids[0]; const selectedVisual = visualOverrides[tableId] ?? question.recommended_visual ?? "data_table"; return <article key={question.semantic_question_id}><div><strong>{question.title}</strong><small>{question.module_name} · {question.evidence.source_ranges?.join(" · ")}</small></div><div className="planning-review-meta"><span className="planning-template-list">{(question.template_matches ?? []).map((match) => <em key={match.template} title={match.reason}>{match.template}</em>)}</span><label className="planning-visual-select"><span className="sr-only">选择图形</span><select value={selectedVisual} onChange={(event) => onVisualChange(tableId, event.target.value)}>{visualChoices.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><span className="planning-confidence">{question.planning_source === "ai" ? `AI ${(question.planning_confidence ?? 0).toFixed(2)}` : question.planning_source === "creator_override" ? "已保存选择" : "规则回退"}</span></div>{question.planning_reason && <p>{question.planning_reason}</p>}</article>; })}</div></section>;
+}
+
+function DashboardDataPreviewItem({ draft, visual }: { draft: DashboardDraft; visual: DashboardVisual }) {
+  const [table, setTable] = useState<ExtractedTable | null>(null);
+  const [error, setError] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const chartRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    let active = true;
+    setTable(null);
+    setError("");
+    fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${draft.project_id}/source-versions/${draft.source_file_version_id}/extraction-tables/${encodeURIComponent(visual.source_extracted_table_id)}`)
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok || !payload.success) throw new Error(payload.detail || "读取预览失败");
+        if (active) setTable(payload.data.table as ExtractedTable);
+      })
+      .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : "读取预览失败"); });
+    return () => { active = false; };
+  }, [draft.project_id, draft.source_file_version_id, visual.source_extracted_table_id]);
+  const base = table?.rows.find((row) => row.detected_row_type === "base" || row.original_label.toLowerCase().startsWith("base:"));
+  const allRows = table?.rows.filter((row) => row !== base) ?? [];
+  const rows = showAll ? allRows : allRows.slice(0, 5);
+  useEffect(() => {
+    if (!chartRef.current || !table || visual.visual_type === "data_table") return;
+    const sourceTable = table;
+    chartRef.current.style.height = `${Math.max(210, rows.length * 32 + 40)}px`;
+    const chart = initECharts(chartRef.current);
+    const precision = Math.max(0, Math.min(3, visual.display_precision ?? 1));
+    const formatValue = (value: number, percentage: boolean) => `${value.toFixed(precision)}${percentage ? "%" : ""}`;
+    const values = rows.map((row) => {
+      const cell = row.cells[0];
+      const percentage = cell?.parsed_unit === "percentage";
+      const value = typeof cell?.parsed_value === "number" ? Number(cell.parsed_value) * (percentage ? 100 : 1) : 0;
+      return { label: row.original_label, value, display: typeof cell?.parsed_value === "number" ? formatValue(value, percentage) : cell?.excel_display_value || "-" };
+    });
+    const isPercentage = rows.some((row) => row.cells[0]?.parsed_unit === "percentage");
+    const visualType = visual.visual_type;
+    const common = { animation: false, tooltip: { trigger: "item" } };
+    const option = visualType === "heatmap"
+      ? { ...common, grid: { left: 8, right: 18, top: 8, bottom: 8, containLabel: true }, xAxis: { type: "category", data: sourceTable.headers.slice(0, 12).map((header) => header.display_label || header.header_path.join(" / ")), axisLabel: { color: "#6f7684", fontSize: 9, rotate: 35 } }, yAxis: { type: "category", data: rows.map((row) => row.original_label), axisLabel: { color: "#334155", fontSize: 9 } }, visualMap: { min: 0, max: isPercentage ? 100 : 1, calculable: false, orient: "horizontal", left: "center", bottom: 0, textStyle: { fontSize: 9 } }, series: [{ type: "heatmap", data: rows.flatMap((row, rowIndex) => sourceTable.headers.slice(0, 12).map((header, columnIndex) => { const cell = row.cells.find((item) => item.extracted_header_id === header.extracted_header_id); const value = typeof cell?.parsed_value === "number" ? Number(cell.parsed_value) * (cell.parsed_unit === "percentage" ? 100 : 1) : 0; return [columnIndex, rowIndex, value]; })), label: { show: false } }] }
+      : visualType === "pie" || visualType === "donut"
+      ? { ...common, tooltip: { trigger: "item", formatter: (params: { name: string; value: number; percent: number }) => `${params.name}<br/>${formatValue(params.value, isPercentage)} (${params.percent.toFixed(precision)}%)` }, series: [{ type: "pie", radius: visualType === "donut" ? ["42%", "72%"] : "68%", data: values.map((item) => ({ name: item.label, value: item.value })), label: { formatter: (params: { name: string; value: number }) => `${params.name} ${formatValue(params.value, isPercentage)}` } }] }
+      : visualType === "funnel" || visualType === "pyramid"
+        ? { ...common, series: [{ type: "funnel", sort: "descending", left: "8%", width: "84%", min: 0, max: isPercentage ? 100 : undefined, data: values.map((item) => ({ name: item.label, value: item.value })), label: { formatter: (params: { name: string; value: number }) => `${params.name} ${formatValue(params.value, isPercentage)}` } }] }
+        : visualType === "radar"
+          ? { ...common, radar: { indicator: values.map((item) => ({ name: item.label, max: isPercentage ? 100 : Math.max(...values.map((value) => value.value), 1) })) }, series: [{ type: "radar", data: [{ value: values.map((item) => item.value), name: visual.title }], areaStyle: { color: "rgba(214,164,0,.18)" }, lineStyle: { color: "#c09100" } }] }
+          : visualType === "scatter"
+            ? { ...common, xAxis: { type: "value" }, yAxis: { type: "value" }, series: [{ type: "scatter", data: values.map((item, index) => [index, item.value]), symbolSize: 9, itemStyle: { color: "#c09100" } }] }
+              : visualType === "bar"
+                ? { ...common, grid: { left: 16, right: 16, top: 18, bottom: 28, containLabel: true }, xAxis: { type: "category", data: values.map((item) => item.label), axisLabel: { color: "#334155", fontSize: 9, rotate: values.length > 8 ? 35 : 0 } }, yAxis: { type: "value", max: isPercentage ? 100 : undefined, axisLabel: { color: "#6f7684", fontSize: 10, formatter: isPercentage ? "{value}%" : "{value}" } }, series: [{ type: "bar", data: values.map((item) => item.value), barMaxWidth: 24, itemStyle: { color: "#d6a400", borderRadius: [3, 3, 0, 0] }, label: { show: true, position: "top", color: "#1d1d1b", fontSize: 9, formatter: (params: { dataIndex: number }) => values[params.dataIndex]?.display || "-" } }] }
+              : visualType === "line"
+              ? { ...common, grid: { left: 8, right: 28, top: 8, bottom: 8, containLabel: true }, xAxis: { type: "category", data: values.map((item) => item.label), axisLabel: { color: "#6f7684", fontSize: 10 } }, yAxis: { type: "value", max: isPercentage ? 100 : undefined, axisLabel: { color: "#6f7684", fontSize: 10, formatter: isPercentage ? "{value}%" : "{value}" } }, series: [{ type: "line", data: values.map((item) => item.value), smooth: true, symbolSize: 7, itemStyle: { color: "#c09100" }, lineStyle: { color: "#c09100", width: 2 } }] }
+              : { ...common, grid: { left: 8, right: 28, top: 8, bottom: 8, containLabel: true }, xAxis: { type: "value", max: isPercentage ? 100 : undefined, axisLabel: { color: "#6f7684", fontSize: 10, formatter: isPercentage ? "{value}%" : "{value}" }, splitLine: { lineStyle: { color: "#e5e7eb" } } }, yAxis: { type: "category", inverse: true, data: values.map((item) => item.label), axisLabel: { color: "#334155", fontSize: 10, width: 100, overflow: "truncate" }, axisLine: { show: false }, axisTick: { show: false } }, series: [{ type: "bar", data: values.map((item) => item.value), barMaxWidth: 18, itemStyle: { color: "#d6a400", borderRadius: [0, 3, 3, 0] }, label: { show: true, position: "right", color: "#1d1d1b", fontSize: 10, formatter: (params: { dataIndex: number }) => values[params.dataIndex]?.display || "-" } }] };
+    chart.setOption(option);
+    const resize = () => chart.resize();
+    window.addEventListener("resize", resize);
+    return () => { window.removeEventListener("resize", resize); chart.dispose(); };
+  }, [rows, visual.visual_type]);
+  if (error) return <article className="data-preview-card"><h3>{visual.title}</h3><p>{error}</p></article>;
+  if (!table) return <article className="data-preview-card"><h3>{visual.title}</h3><p>正在读取已验证数据...</p></article>;
+  return <article className="data-preview-card"><div><div className="section-kicker">{visual.visual_type.toUpperCase()}</div><div className="preview-card-title"><h3>{visual.title}</h3><button className="text-button" onClick={() => setShowAll((current) => !current)}>{showAll ? "收起" : `显示全部 ${allRows.length} 项`}</button></div>{base && <small>Base: {base.cells[0]?.excel_display_value || "-"}</small>}</div>{visual.visual_type === "data_table" ? <div className="preview-bars">{rows.map((row) => <div className="preview-bar-row" key={row.extracted_row_id}><span title={row.original_label}>{row.original_label}</span><strong>{row.cells[0]?.excel_display_value || "-"}</strong></div>)}</div> : <div className="echarts-preview" ref={chartRef} aria-label={`${visual.title} ${visual.visual_type}`} />}<div className="draft-visual-evidence"><Database size={14} /><span>{table.source_range}</span></div></article>;
+}
+
+function WorkflowPanel({ activeView, fileVersions, processingJob, recognitionResult, extractionTables, tableDirectory, tableDirectoryTotal, tableDirectoryPage, loadingTableId, onOpenTable, onChangeTablePage, dashboardDraft, dashboardGenerating, onGenerateDraft, reviewIssues, explorerDetail, setExplorerDetail, onResolveReviewIssue, setShowUpload, selectedSheet, setSelectedSheet, setSelectedVersionDetails, query, setQuery, statusFilter, setStatusFilter, onRefresh }: { activeView: Exclude<WorkflowView, "overview">; fileVersions: FileVersion[]; processingJob: ProcessingJob | null; recognitionResult: RecognitionResult | null; extractionTables: ExtractedTable[]; tableDirectory: ExtractedTableSummary[]; tableDirectoryTotal: number; tableDirectoryPage: number; loadingTableId: string; onOpenTable: (tableId: string) => void; onChangeTablePage: (page: number) => void; dashboardDraft: DashboardDraft | null; dashboardGenerating: boolean; onGenerateDraft: (options?: DashboardDraftOptions) => void; reviewIssues: ReviewIssue[]; explorerDetail: ExplorerDetail; setExplorerDetail: (detail: ExplorerDetail) => void; onResolveReviewIssue: (issue: ReviewIssue, creatorNote?: string) => void; setShowUpload: (open: boolean) => void; selectedSheet: string; setSelectedSheet: (sheet: string) => void; setSelectedVersionDetails: (version: FileVersion) => void; query: string; setQuery: (value: string) => void; statusFilter: "全部状态" | Status; setStatusFilter: (value: "全部状态" | Status) => void; onRefresh: () => void }) {
+  const [visualOverrides, setVisualOverrides] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!dashboardDraft) return;
+    setVisualOverrides(Object.fromEntries((dashboardDraft.semantic_questions ?? []).filter((question) => question.planning_source === "creator_override").map((question) => [question.source_extracted_table_ids[0], question.recommended_visual ?? "data_table"])));
+  }, [dashboardDraft?.dashboard_version_id]);
   const panelCopy: Record<Exclude<WorkflowView, "overview">, { kicker: string; title: string; description: string }> = {
     versions: { kicker: "SOURCE FILE VERSIONS", title: "文件与版本", description: "管理追加文件和同一逻辑数据集的修正版，历史来源不会被覆盖。" },
     processing: { kicker: "PROCESSING STATUS", title: "识别进度", description: "当前没有正在运行的识别任务；启动真实任务后，这里显示阶段和后台处理状态。" },
     review: { kicker: "REVIEW SUMMARY", title: "Review Summary", description: "问题按风险分级展示；未确认的范围、Wave 或结构分类不会静默发布。" },
     explorer: { kicker: "DATA EXPLORER", title: "Data Explorer", description: "按 Sheet、物理表和来源坐标浏览已通过 Python 回读的结果。" },
     dashboard: { kicker: "DASHBOARD DRAFT", title: "Dashboard Draft", description: "Dashboard Builder 将在语义模型和发布门禁接入后启用。" },
+    dashboard_preview: { kicker: "DASHBOARD PREVIEW", title: "Dashboard Preview", description: "查看当前 Draft 已纳入题目的完整图表预览；预览只读取已验证的源表。" },
   };
   const copy = panelCopy[activeView];
   const recognizedSheets = recognitionResult?.result.sheets?.map((sheet) => {
@@ -587,6 +853,15 @@ function WorkflowPanel({ activeView, fileVersions, processingJob, recognitionRes
     : processingJob?.status === "completed"
       ? "已完成 Python 校验和结果保存。"
       : "AI 正在处理轻量结构摘要。大 Sheet 可能需要数分钟；可刷新页面，任务状态会从本地后端恢复。";
+  if ((activeView as WorkflowView) === "explorer") {
+    return <PhysicalTableExplorer tables={tableDirectory} total={tableDirectoryTotal} page={tableDirectoryPage} selectedTable={extractionTables[0] ?? null} loadingTableId={loadingTableId} onOpenTable={onOpenTable} onChangePage={onChangeTablePage} />;
+  }
+  if ((activeView as WorkflowView) === "dashboard") {
+    return <DashboardDraftWorkspace draft={dashboardDraft} generating={dashboardGenerating} onGenerate={onGenerateDraft} visualOverrides={visualOverrides} onVisualChange={(tableId, visual) => setVisualOverrides((current) => ({ ...current, [tableId]: visual }))} />;
+  }
+  if ((activeView as WorkflowView) === "dashboard_preview") {
+    return <DashboardPreviewWorkspace draft={dashboardDraft} />;
+  }
   return <section className="standalone-view"><div className="page-header"><div><div className="eyebrow">{copy.kicker} · CREATOR WORKSPACE</div><h1>{copy.title}</h1><p>{copy.description}</p></div>{activeView === "versions" && <button className="button primary" onClick={() => setShowUpload(true)}><Plus size={16} />追加文件</button>}</div>{activeView === "versions" && <div className="workspace-card standalone-card"><div className="version-list">{fileVersions.map((version, index) => <div className="version-row" key={version.id}><span className="version-number">{index === 0 ? "当前" : version.id.replace("sfv_", "v")}</span><div className="version-file"><FileSpreadsheet size={15} /><strong>{version.fileName}</strong></div><span>{version.market}</span><span>{version.wave}</span><span className="version-relation">{version.relation}</span><StatusBadge status={version.status} /><button className="icon-button" title="版本详情" onClick={() => setSelectedVersionDetails(version)}><ArrowUpRight size={15} /></button></div>)}</div></div>}{activeView === "processing" && processingJob && <div className="workspace-card processing-card"><div className="section-kicker">BACKGROUND JOB · {processingJob.job_id}</div><h2>{processingJob.status === "completed" ? "识别任务已完成" : processingJob.status === "failed" ? "识别任务失败" : "识别任务处理中"}</h2><p>{processingJob.phase}。</p><p className="processing-guidance">{processingDescription}</p><div className="processing-progress"><div style={{ width: `${processingJob.progress_percent}%` }} /></div><div className="processing-meta"><span>{processingJob.progress_percent}%</span><span>{processingJob.source_file_version_id}</span><button className="text-button" onClick={onRefresh}>刷新状态</button></div>{processingJob.error_message && <div className="upload-error"><AlertTriangle size={14} />{processingJob.error_message}</div>}</div>}{activeView === "review" && <div className="review-detail-grid"><div className="workspace-card standalone-card"><div className="card-heading"><div><div className="section-kicker">OPEN ISSUES</div><h2>待处理问题</h2></div><span className="status-badge status-warning"><AlertTriangle size={12} />{openIssues.length} 个待确认</span></div><ReviewIssueList issues={openIssues} onResolve={onResolveReviewIssue} /></div><div className="workspace-card risk-explanation"><div className="section-kicker">PUBLICATION GATE</div><h2>{openIssues.some((issue) => issue.blocks_publication) ? "发布暂不可用" : "当前无发布阻断问题"}</h2><p>{openIssues.length ? "风险项未完成确认，源坐标和审计记录会被保留。" : "当前识别结果没有待处理的发布风险。"}</p></div></div>}{activeView === "explorer" && <div className="workspace-card standalone-card"><div className="table-toolbar"><label className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 Sheet 或来源类型" /></label><label className="filter-button"><Filter size={14} /><select aria-label="按状态筛选" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "全部状态" | Status)}><option>全部状态</option><option>已验证</option><option>需 Review</option><option>处理中</option><option>已扫描</option></select><ChevronDown size={14} /></label></div><div className="sheet-table" role="table" aria-label="Data Explorer Sheet 列表">{explorerSheets.map((sheet) => <button key={sheet.name} className={`sheet-row ${selectedSheet === sheet.name ? "selected" : ""}`} onClick={() => { setSelectedSheet(sheet.name); setExplorerDetail("none"); }}><span className="sheet-name"><FileSpreadsheet size={16} /><span><strong>{sheet.name}</strong><small>{sheet.family}</small></span></span><span>{sheet.tables || "—"}</span><span className="mono-cell">{sheet.range}</span><span><StatusBadge status={sheet.status} /></span><ArrowUpRight size={15} /></button>)}</div><div className="table-note"><span><Database size={14} />选择 Sheet 后在下方查看真实提取结果</span><span>Source Lineage 已保留</span></div></div>}{activeView === "explorer" && explorerDetail !== "source" && selectedRecognitionSheet && <div className="workspace-card recognition-detail-card"><div className="section-kicker">VALIDATED STRUCTURE · {selectedRecognitionSheet.sheet_name}</div><h2>物理表结构提案</h2>{proposalsForSelectedSheet.length === 0 ? <p>当前 Sheet 没有返回物理表提案。</p> : proposalsForSelectedSheet.map((proposal, index) => <div className="proposal-row" key={`${proposal.source_range}-${index}`}><strong>{proposal.source_range}</strong><span>Header: {proposal.regions?.header_rows?.join(", ") || "—"}</span><span>Base: {proposal.regions?.base_rows?.join(", ") || "—"}</span><span>Data: {proposal.regions?.data_rows?.join(", ") || "—"}</span><span>Footnote: {proposal.regions?.footnote_rows?.join(", ") || "—"}</span><span>Sig: {proposal.regions?.significance_layout || "none"}</span></div>)}</div>}{activeView === "explorer" && explorerDetail === "source" && selectedExtractedTable && <SourceEvidencePanel table={selectedExtractedTable} />}{activeView === "explorer" && explorerDetail !== "source" && (selectedExtractedTable ? <div className="workspace-card explorer-card"><ExtractedTablePreview table={selectedExtractedTable} /></div> : <div className="workspace-card empty-workflow"><div className="empty-icon"><Database size={23} /></div><h2>当前 Sheet 尚无可展示的提取数据</h2><p>完成边界校验后，Python 回读的真实表格会显示在这里。</p></div>)}{activeView === "dashboard" && (extractionTables.length ? <div className="dashboard-draft"><section className="summary-grid" aria-label="Dashboard 数据摘要"><SummaryCard label="已校验表格" value={String(extractionTables.length)} meta="当前文件版本" icon={<ShieldCheck size={18} />} tone="green" /><SummaryCard label="数据行" value={String(extractionTables.reduce((total, table) => total + table.rows.length, 0))} meta="不含模型生成数值" icon={<Database size={18} />} tone="neutral" /><SummaryCard label="待处理问题" value={String(openIssues.length)} meta={openIssues.length ? "发布仍受阻断" : "当前版本无阻断"} icon={<AlertTriangle size={18} />} tone="orange" /></section><div className="workspace-card explorer-card"><div className="card-heading"><div><div className="section-kicker">VALIDATED DATASET</div><h2>{extractionTables[0].detected_question_number || extractionTables[0].detected_table_title}</h2><p>Dashboard Draft 仅引用当前版本已通过 Python 校验的提取数据。</p></div></div><ExtractedTablePreview table={extractionTables[0]} /></div></div> : <div className="workspace-card empty-workflow"><div className="empty-icon"><CircleHelp size={23} /></div><h2>当前版本尚无可用 Dashboard 数据</h2><p>完成识别、Python 提取并通过 Review 后，才能创建可发布的 Dashboard Draft。</p></div>)}{activeView === "processing" && !processingJob && <div className="workspace-card empty-workflow"><div className="empty-icon"><CircleHelp size={23} /></div><h2>等待识别任务</h2><p>上传文件后，后台任务会在这里显示 Workbook 扫描和后续识别阶段。</p><button className="button secondary" onClick={() => setShowUpload(true)}><Upload size={15} />返回上传文件</button></div>}</section>;
 }
 

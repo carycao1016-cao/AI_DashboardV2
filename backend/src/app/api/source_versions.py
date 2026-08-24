@@ -253,6 +253,66 @@ def get_extraction(project_id: str, source_file_version_id: str) -> dict[str, ob
     }
 
 
+def _get_extracted_tables(project_id: str, source_file_version_id: str) -> list[dict[str, object]]:
+    """读取最近一次识别中由 Python 回读并保存的物理表。"""
+    job = get_latest_processing_job(project_id, source_file_version_id, "recognition")
+    if job is None:
+        raise HTTPException(status_code=404, detail="尚无 AI 识别结果")
+    result = job.get("result") or {}
+    sheets = result.get("sheets") if isinstance(result, dict) else None
+    return [
+        table
+        for sheet in (sheets if isinstance(sheets, list) else [])
+        for table in (sheet.get("extracted_tables", []) if isinstance(sheet, dict) else [])
+        if isinstance(table, dict)
+    ]
+
+
+@router.get("/{project_id}/source-versions/{source_file_version_id}/extraction-tables")
+def list_extraction_tables(
+    project_id: str,
+    source_file_version_id: str,
+    page: int = 1,
+    page_size: int = 20,
+) -> dict[str, object]:
+    """分页返回物理表目录，不传输明细单元格。"""
+    if page < 1 or not 1 <= page_size <= 100:
+        raise HTTPException(status_code=422, detail="分页参数无效")
+    tables = _get_extracted_tables(project_id, source_file_version_id)
+    start = (page - 1) * page_size
+    summaries = [
+        {
+            "extracted_table_id": table.get("extracted_table_id"),
+            "source_sheet": table.get("source_sheet"),
+            "source_range": table.get("source_range"),
+            "detected_question_number": table.get("detected_question_number"),
+            "detected_question_text": table.get("detected_question_text"),
+            "detected_table_title": table.get("detected_table_title"),
+            "table_variant": table.get("table_variant"),
+            "header_count": len(table.get("headers", [])) if isinstance(table.get("headers"), list) else 0,
+            "row_count": len(table.get("rows", [])) if isinstance(table.get("rows"), list) else 0,
+        }
+        for table in tables[start:start + page_size]
+    ]
+    return {"success": True, "data": {"tables": summaries, "page": page, "page_size": page_size, "total": len(tables)}}
+
+
+@router.get("/{project_id}/source-versions/{source_file_version_id}/extraction-tables/{extracted_table_id}")
+def get_extraction_table(
+    project_id: str,
+    source_file_version_id: str,
+    extracted_table_id: str,
+) -> dict[str, object]:
+    """仅在 Creator 打开一张物理表时返回该表的完整回读结果。"""
+    table = next(
+        (item for item in _get_extracted_tables(project_id, source_file_version_id) if item.get("extracted_table_id") == extracted_table_id),
+        None,
+    )
+    if table is None:
+        raise HTTPException(status_code=404, detail="物理表不存在")
+    return {"success": True, "data": {"table": table}}
+
+
 @router.get("/{project_id}/review-issues")
 def get_review_issues(project_id: str) -> dict[str, object]:
     """返回当前项目所有源版本的真实 Review 问题。"""

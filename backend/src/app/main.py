@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.source_versions import router as source_versions_router
+from .api.dashboard_drafts import router as dashboard_drafts_router
 from .infrastructure.db import create_project, get_project, get_project_by_normalized_name, initialize_database, list_projects, normalize_project_name
 from .schemas.projects import CreateProjectRequest
 
@@ -59,3 +60,4 @@ def get_project_endpoint(project_id: str) -> dict[str, object]:
 
 
 app.include_router(source_versions_router)
+app.include_router(dashboard_drafts_router)
