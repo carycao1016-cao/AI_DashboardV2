@@ -1,0 +1,6 @@
+{
+  "name": "AI Research Dashboard",
+  "description": "AI-powered market research dashboard platform for tabular data extraction, recognition, review validation, and visual analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

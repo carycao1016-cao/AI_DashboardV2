@@ -274,6 +274,10 @@ export function App() {
     const selectedVersion = project.source_file_versions.find((version) => version.source_file_version_id === (requestedSourceVersionId ?? selectedSourceVersionId))
       ?? project.source_file_versions[0];
     setSelectedSourceVersionId(selectedVersion?.source_file_version_id || "");
+    if (selectedVersion) {
+      setMarketScope(selectedVersion.market_scope || "中国 (CN)");
+      setWaveScope(selectedVersion.wave_scope || "Wave 1");
+    }
     const reviewResponse = await fetch(`${uiConfig.parserApiBaseUrl}/api/projects/${id}/review-issues`);
     if (reviewResponse.ok) {
       const reviewPayload = await reviewResponse.json();
@@ -734,8 +738,82 @@ function DashboardDraftWorkspace({ draft, generating, onGenerate, visualOverride
 }
 
 function DashboardPreviewWorkspace({ draft }: { draft: DashboardDraft | null }) {
+  const [previewEditMode, setPreviewEditMode] = useState(false);
+  const [localOverrides, setLocalOverrides] = useState<Record<string, { visualType?: string; title?: string; precision?: number }>>({});
+
   if (!draft) return <section className="standalone-view"><div className="page-header"><div><div className="eyebrow">DASHBOARD PREVIEW</div><h1>尚未生成 Dashboard Draft</h1><p>先在 Dashboard Draft 中完成 AI 规划和内容范围选择。</p></div></div></section>;
-  return <section className="standalone-view dashboard-preview-workspace"><div className="page-header"><div><div className="eyebrow">DASHBOARD PREVIEW · DRAFT V{draft.revision ?? 1}</div><h1>{draft.dashboard_name}</h1><p>这里集中查看所有已纳入 Draft 的页面和图表；修改题目或图形请返回左侧 Dashboard Draft。</p></div><span className="status-badge status-success"><ShieldCheck size={12} />已验证数据</span></div>{draft.pages.map((page) => <section className="dashboard-preview-page" key={page.dashboard_page_id}><div className="card-heading"><div><div className="section-kicker">{page.category.toUpperCase()}</div><h2>{page.title}</h2></div><span className="status-badge status-info">{page.visuals.length} 个图表</span></div><div className="dashboard-data-grid">{page.visuals.map((visual) => <DashboardDataPreviewItem key={visual.dashboard_visual_id} draft={draft} visual={visual} />)}</div></section>)}</section>;
+  
+  return (
+    <section className="standalone-view dashboard-preview-workspace">
+      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
+        <div>
+          <div className="eyebrow">DASHBOARD PREVIEW · DRAFT V{draft.revision ?? 1}</div>
+          <h1>{draft.dashboard_name}</h1>
+          <p>
+            {previewEditMode 
+              ? "当前处于【编辑模式】：您可以直接修改图表类型、卡片标题及数值精度。" 
+              : "这里集中查看所有已纳入 Draft 的页面和图表；点击右侧按钮可直接进入编辑模式。"}
+          </p>
+        </div>
+        <div className="preview-header-actions" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            id="btn-toggle-edit-mode"
+            className="button"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              backgroundColor: previewEditMode ? "#1d1d1b" : "#fcc53b",
+              color: previewEditMode ? "#ffffff" : "#1d1d1b",
+              fontWeight: 700,
+              padding: "10px 20px",
+              borderRadius: "6px",
+              border: previewEditMode ? "1px solid #1d1d1b" : "none",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+              cursor: "pointer",
+              fontSize: "14px"
+            }}
+            onClick={() => setPreviewEditMode(!previewEditMode)}
+          >
+            <Settings2 size={16} />
+            {previewEditMode ? "✓ 退出编辑并锁定" : "✏️ 进入编辑模式 (Edit Mode)"}
+          </button>
+          <span className="status-badge status-success" style={{ padding: "6px 12px" }}>
+            <ShieldCheck size={14} />已验证数据
+          </span>
+        </div>
+      </div>
+
+      {draft.pages.map((page) => (
+        <section className="dashboard-preview-page" key={page.dashboard_page_id} style={{ marginBottom: 32 }}>
+          <div className="card-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div>
+              <div className="section-kicker">{page.category.toUpperCase()}</div>
+              <h2>{page.title}</h2>
+            </div>
+            <span className="status-badge status-info">{page.visuals.length} 个图表</span>
+          </div>
+          <div className="dashboard-data-grid">
+            {page.visuals.map((visual) => (
+              <DashboardDataPreviewItem 
+                key={visual.dashboard_visual_id} 
+                draft={draft} 
+                visual={visual}
+                isEditMode={previewEditMode}
+                override={localOverrides[visual.dashboard_visual_id]}
+                onUpdateOverride={(upd) => {
+                  setLocalOverrides((prev) => ({
+                    ...prev,
+                    [visual.dashboard_visual_id]: { ...(prev[visual.dashboard_visual_id] || {}), ...upd }
+                  }));
+                }}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+    </section>
+  );
 }
 
 function DashboardDataPreview({ draft }: { draft: DashboardDraft | null }) {
@@ -756,11 +834,28 @@ function PlanningReviewPanel({ draft, visualOverrides, onVisualChange, onSave, g
   return <section className="workspace-card planning-review-card"><div className="card-heading"><div><div className="section-kicker">AI PLANNING REVIEW</div><h2>2. 检查题目与图形</h2><p>修改图形后，请在这里保存；保存成功后到左侧 Dashboard Preview 查看新结果。</p></div><button className="button primary" onClick={onSave} disabled={generating}><Sparkles size={15} />{generating ? "正在更新" : "保存图形并更新 Draft"}</button></div><div className="planning-review-list">{questions.map((question) => { const tableId = question.source_extracted_table_ids[0]; const selectedVisual = visualOverrides[tableId] ?? question.recommended_visual ?? "data_table"; return <article key={question.semantic_question_id}><div><strong>{question.title}</strong><small>{question.module_name} · {question.evidence.source_ranges?.join(" · ")}</small></div><div className="planning-review-meta"><span className="planning-template-list">{(question.template_matches ?? []).map((match) => <em key={match.template} title={match.reason}>{match.template}</em>)}</span><label className="planning-visual-select"><span className="sr-only">选择图形</span><select value={selectedVisual} onChange={(event) => onVisualChange(tableId, event.target.value)}>{visualChoices.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><span className="planning-confidence">{question.planning_source === "ai" ? `AI ${(question.planning_confidence ?? 0).toFixed(2)}` : question.planning_source === "creator_override" ? "已保存选择" : "规则回退"}</span></div>{question.planning_reason && <p>{question.planning_reason}</p>}</article>; })}</div></section>;
 }
 
-function DashboardDataPreviewItem({ draft, visual }: { draft: DashboardDraft; visual: DashboardVisual }) {
+function DashboardDataPreviewItem({ 
+  draft, 
+  visual, 
+  isEditMode = false, 
+  override, 
+  onUpdateOverride 
+}: { 
+  draft: DashboardDraft; 
+  visual: DashboardVisual; 
+  isEditMode?: boolean; 
+  override?: { visualType?: string; title?: string; precision?: number }; 
+  onUpdateOverride?: (upd: { visualType?: string; title?: string; precision?: number }) => void;
+}) {
   const [table, setTable] = useState<ExtractedTable | null>(null);
   const [error, setError] = useState("");
   const [showAll, setShowAll] = useState(false);
   const chartRef = useRef<HTMLDivElement | null>(null);
+
+  const effectiveVisualType = override?.visualType || visual.visual_type;
+  const effectiveTitle = override?.title !== undefined ? override.title : visual.title;
+  const effectivePrecision = override?.precision !== undefined ? override.precision : (visual.display_precision ?? 1);
+
   useEffect(() => {
     let active = true;
     setTable(null);
@@ -774,15 +869,17 @@ function DashboardDataPreviewItem({ draft, visual }: { draft: DashboardDraft; vi
       .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : "读取预览失败"); });
     return () => { active = false; };
   }, [draft.project_id, draft.source_file_version_id, visual.source_extracted_table_id]);
+
   const base = table?.rows.find((row) => row.detected_row_type === "base" || row.original_label.toLowerCase().startsWith("base:"));
   const allRows = table?.rows.filter((row) => row !== base) ?? [];
   const rows = showAll ? allRows : allRows.slice(0, 5);
+
   useEffect(() => {
-    if (!chartRef.current || !table || visual.visual_type === "data_table") return;
+    if (!chartRef.current || !table || effectiveVisualType === "data_table") return;
     const sourceTable = table;
     chartRef.current.style.height = `${Math.max(210, rows.length * 32 + 40)}px`;
     const chart = initECharts(chartRef.current);
-    const precision = Math.max(0, Math.min(3, visual.display_precision ?? 1));
+    const precision = Math.max(0, Math.min(3, effectivePrecision));
     const formatValue = (value: number, percentage: boolean) => `${value.toFixed(precision)}${percentage ? "%" : ""}`;
     const values = rows.map((row) => {
       const cell = row.cells[0];
@@ -791,31 +888,326 @@ function DashboardDataPreviewItem({ draft, visual }: { draft: DashboardDraft; vi
       return { label: row.original_label, value, display: typeof cell?.parsed_value === "number" ? formatValue(value, percentage) : cell?.excel_display_value || "-" };
     });
     const isPercentage = rows.some((row) => row.cells[0]?.parsed_unit === "percentage");
-    const visualType = visual.visual_type;
-    const common = { animation: false, tooltip: { trigger: "item" } };
-    const option = visualType === "heatmap"
-      ? { ...common, grid: { left: 8, right: 18, top: 8, bottom: 8, containLabel: true }, xAxis: { type: "category", data: sourceTable.headers.slice(0, 12).map((header) => header.display_label || header.header_path.join(" / ")), axisLabel: { color: "#6f7684", fontSize: 9, rotate: 35 } }, yAxis: { type: "category", data: rows.map((row) => row.original_label), axisLabel: { color: "#334155", fontSize: 9 } }, visualMap: { min: 0, max: isPercentage ? 100 : 1, calculable: false, orient: "horizontal", left: "center", bottom: 0, textStyle: { fontSize: 9 } }, series: [{ type: "heatmap", data: rows.flatMap((row, rowIndex) => sourceTable.headers.slice(0, 12).map((header, columnIndex) => { const cell = row.cells.find((item) => item.extracted_header_id === header.extracted_header_id); const value = typeof cell?.parsed_value === "number" ? Number(cell.parsed_value) * (cell.parsed_unit === "percentage" ? 100 : 1) : 0; return [columnIndex, rowIndex, value]; })), label: { show: false } }] }
-      : visualType === "pie" || visualType === "donut"
-      ? { ...common, tooltip: { trigger: "item", formatter: (params: { name: string; value: number; percent: number }) => `${params.name}<br/>${formatValue(params.value, isPercentage)} (${params.percent.toFixed(precision)}%)` }, series: [{ type: "pie", radius: visualType === "donut" ? ["42%", "72%"] : "68%", data: values.map((item) => ({ name: item.label, value: item.value })), label: { formatter: (params: { name: string; value: number }) => `${params.name} ${formatValue(params.value, isPercentage)}` } }] }
-      : visualType === "funnel" || visualType === "pyramid"
-        ? { ...common, series: [{ type: "funnel", sort: "descending", left: "8%", width: "84%", min: 0, max: isPercentage ? 100 : undefined, data: values.map((item) => ({ name: item.label, value: item.value })), label: { formatter: (params: { name: string; value: number }) => `${params.name} ${formatValue(params.value, isPercentage)}` } }] }
-        : visualType === "radar"
-          ? { ...common, radar: { indicator: values.map((item) => ({ name: item.label, max: isPercentage ? 100 : Math.max(...values.map((value) => value.value), 1) })) }, series: [{ type: "radar", data: [{ value: values.map((item) => item.value), name: visual.title }], areaStyle: { color: "rgba(214,164,0,.18)" }, lineStyle: { color: "#c09100" } }] }
-          : visualType === "scatter"
-            ? { ...common, xAxis: { type: "value" }, yAxis: { type: "value" }, series: [{ type: "scatter", data: values.map((item, index) => [index, item.value]), symbolSize: 9, itemStyle: { color: "#c09100" } }] }
-              : visualType === "bar"
-                ? { ...common, grid: { left: 16, right: 16, top: 18, bottom: 28, containLabel: true }, xAxis: { type: "category", data: values.map((item) => item.label), axisLabel: { color: "#334155", fontSize: 9, rotate: values.length > 8 ? 35 : 0 } }, yAxis: { type: "value", max: isPercentage ? 100 : undefined, axisLabel: { color: "#6f7684", fontSize: 10, formatter: isPercentage ? "{value}%" : "{value}" } }, series: [{ type: "bar", data: values.map((item) => item.value), barMaxWidth: 24, itemStyle: { color: "#d6a400", borderRadius: [3, 3, 0, 0] }, label: { show: true, position: "top", color: "#1d1d1b", fontSize: 9, formatter: (params: { dataIndex: number }) => values[params.dataIndex]?.display || "-" } }] }
-              : visualType === "line"
-              ? { ...common, grid: { left: 8, right: 28, top: 8, bottom: 8, containLabel: true }, xAxis: { type: "category", data: values.map((item) => item.label), axisLabel: { color: "#6f7684", fontSize: 10 } }, yAxis: { type: "value", max: isPercentage ? 100 : undefined, axisLabel: { color: "#6f7684", fontSize: 10, formatter: isPercentage ? "{value}%" : "{value}" } }, series: [{ type: "line", data: values.map((item) => item.value), smooth: true, symbolSize: 7, itemStyle: { color: "#c09100" }, lineStyle: { color: "#c09100", width: 2 } }] }
-              : { ...common, grid: { left: 8, right: 28, top: 8, bottom: 8, containLabel: true }, xAxis: { type: "value", max: isPercentage ? 100 : undefined, axisLabel: { color: "#6f7684", fontSize: 10, formatter: isPercentage ? "{value}%" : "{value}" }, splitLine: { lineStyle: { color: "#e5e7eb" } } }, yAxis: { type: "category", inverse: true, data: values.map((item) => item.label), axisLabel: { color: "#334155", fontSize: 10, width: 100, overflow: "truncate" }, axisLine: { show: false }, axisTick: { show: false } }, series: [{ type: "bar", data: values.map((item) => item.value), barMaxWidth: 18, itemStyle: { color: "#d6a400", borderRadius: [0, 3, 3, 0] }, label: { show: true, position: "right", color: "#1d1d1b", fontSize: 10, formatter: (params: { dataIndex: number }) => values[params.dataIndex]?.display || "-" } }] };
+    const visualType = effectiveVisualType;
+    const palette = ["#d6a400", "#1d1d1b", "#0284c7", "#10b981", "#8b5cf6", "#f97316", "#06b6d4", "#ec4899", "#64748b"];
+    const common = { animation: false, tooltip: { trigger: "item" }, color: palette };
+
+    let option: any;
+    if (visualType === "heatmap") {
+      option = {
+        ...common,
+        grid: { left: 8, right: 18, top: 10, bottom: 25, containLabel: true },
+        xAxis: {
+          type: "category",
+          data: sourceTable.headers.slice(0, 12).map((header) => header.display_label || header.header_path.join(" / ")),
+          axisLabel: { color: "#6f7684", fontSize: 9, rotate: 35 }
+        },
+        yAxis: {
+          type: "category",
+          data: rows.map((row) => row.original_label),
+          axisLabel: { color: "#334155", fontSize: 9 }
+        },
+        visualMap: {
+          min: 0,
+          max: isPercentage ? 100 : 1,
+          calculable: false,
+          orient: "horizontal",
+          left: "center",
+          bottom: 0,
+          textStyle: { fontSize: 9 }
+        },
+        series: [{
+          type: "heatmap",
+          data: rows.flatMap((row, rowIndex) =>
+            sourceTable.headers.slice(0, 12).map((header, columnIndex) => {
+              const cell = row.cells.find((item) => item.extracted_header_id === header.extracted_header_id);
+              const value = typeof cell?.parsed_value === "number" ? Number(cell.parsed_value) * (cell.parsed_unit === "percentage" ? 100 : 1) : 0;
+              return [columnIndex, rowIndex, value];
+            })
+          ),
+          label: { show: false }
+        }]
+      };
+    } else if (visualType === "pie" || visualType === "donut") {
+      option = {
+        ...common,
+        tooltip: {
+          trigger: "item",
+          formatter: (params: { name: string; value: number; percent: number }) => `${params.name}<br/>${formatValue(params.value, isPercentage)} (${params.percent.toFixed(precision)}%)`
+        },
+        legend: {
+          orient: "horizontal",
+          bottom: 0,
+          textStyle: { fontSize: 9 },
+          type: "scroll"
+        },
+        series: [{
+          type: "pie",
+          radius: visualType === "donut" ? ["38%", "68%"] : "65%",
+          center: ["50%", "46%"],
+          data: values.map((item) => ({ name: item.label, value: item.value })),
+          label: {
+            formatter: (params: { name: string; value: number }) => `${params.name} ${formatValue(params.value, isPercentage)}`
+          }
+        }]
+      };
+    } else if (visualType === "funnel" || visualType === "pyramid") {
+      option = {
+        ...common,
+        tooltip: {
+          trigger: "item",
+          formatter: (params: { name: string; value: number }) => `${params.name}: ${formatValue(params.value, isPercentage)}`
+        },
+        series: [{
+          type: "funnel",
+          sort: "descending",
+          left: "10%",
+          width: "80%",
+          min: 0,
+          max: isPercentage ? 100 : undefined,
+          data: values.map((item) => ({ name: item.label, value: item.value })),
+          label: {
+            formatter: (params: { name: string; value: number }) => `${params.name} ${formatValue(params.value, isPercentage)}`
+          },
+          itemStyle: { borderColor: "#fff", borderWidth: 1 }
+        }]
+      };
+    } else if (visualType === "radar") {
+      const maxVal = Math.max(...values.map((v) => v.value), 1);
+      option = {
+        ...common,
+        radar: {
+          indicator: values.map((item) => ({ name: item.label, max: isPercentage ? 100 : maxVal * 1.15 })),
+          radius: "62%"
+        },
+        series: [{
+          type: "radar",
+          data: [{ value: values.map((item) => item.value), name: effectiveTitle }],
+          areaStyle: { color: "rgba(214,164,0,0.25)" },
+          lineStyle: { color: "#d6a400", width: 2 }
+        }]
+      };
+    } else if (visualType === "scatter") {
+      option = {
+        ...common,
+        xAxis: { type: "value" },
+        yAxis: { type: "value" },
+        series: [{
+          type: "scatter",
+          data: values.map((item, index) => [index, item.value]),
+          symbolSize: 9,
+          itemStyle: { color: "#d6a400" }
+        }]
+      };
+    } else if (visualType === "grouped_bar") {
+      const headersToUse = sourceTable.headers.length > 1 ? sourceTable.headers.slice(0, 4) : [];
+      if (headersToUse.length > 1) {
+        option = {
+          ...common,
+          grid: { left: 16, right: 16, top: 28, bottom: 28, containLabel: true },
+          legend: { top: 0, textStyle: { fontSize: 9 } },
+          xAxis: {
+            type: "category",
+            data: rows.map((r) => r.original_label),
+            axisLabel: { color: "#334155", fontSize: 9, rotate: rows.length > 6 ? 25 : 0 }
+          },
+          yAxis: {
+            type: "value",
+            max: isPercentage ? 100 : undefined,
+            axisLabel: { color: "#6f7684", fontSize: 10, formatter: isPercentage ? "{value}%" : "{value}" }
+          },
+          series: headersToUse.map((h) => ({
+            name: h.display_label || h.header_path.join(" / "),
+            type: "bar",
+            barMaxWidth: 16,
+            data: rows.map((r) => {
+              const cell = r.cells.find((c) => c.extracted_header_id === h.extracted_header_id);
+              return typeof cell?.parsed_value === "number" ? Number(cell.parsed_value) * (cell.parsed_unit === "percentage" ? 100 : 1) : 0;
+            })
+          }))
+        };
+      } else {
+        option = {
+          ...common,
+          grid: { left: 16, right: 16, top: 18, bottom: 28, containLabel: true },
+          xAxis: {
+            type: "category",
+            data: values.map((item) => item.label),
+            axisLabel: { color: "#334155", fontSize: 9, rotate: values.length > 6 ? 25 : 0 }
+          },
+          yAxis: {
+            type: "value",
+            max: isPercentage ? 100 : undefined,
+            axisLabel: { color: "#6f7684", fontSize: 10, formatter: isPercentage ? "{value}%" : "{value}" }
+          },
+          series: [{
+            type: "bar",
+            data: values.map((item) => item.value),
+            barMaxWidth: 22,
+            itemStyle: { color: "#d6a400", borderRadius: [3, 3, 0, 0] },
+            label: { show: true, position: "top", color: "#1d1d1b", fontSize: 9, formatter: (params: { dataIndex: number }) => values[params.dataIndex]?.display || "-" }
+          }]
+        };
+      }
+    } else if (visualType === "bar") {
+      option = {
+        ...common,
+        grid: { left: 16, right: 16, top: 18, bottom: 28, containLabel: true },
+        xAxis: {
+          type: "category",
+          data: values.map((item) => item.label),
+          axisLabel: { color: "#334155", fontSize: 9, rotate: values.length > 8 ? 35 : 0 }
+        },
+        yAxis: {
+          type: "value",
+          max: isPercentage ? 100 : undefined,
+          axisLabel: { color: "#6f7684", fontSize: 10, formatter: isPercentage ? "{value}%" : "{value}" }
+        },
+        series: [{
+          type: "bar",
+          data: values.map((item) => item.value),
+          barMaxWidth: 24,
+          itemStyle: { color: "#d6a400", borderRadius: [3, 3, 0, 0] },
+          label: { show: true, position: "top", color: "#1d1d1b", fontSize: 9, formatter: (params: { dataIndex: number }) => values[params.dataIndex]?.display || "-" }
+        }]
+      };
+    } else if (visualType === "line") {
+      option = {
+        ...common,
+        grid: { left: 16, right: 28, top: 16, bottom: 24, containLabel: true },
+        xAxis: {
+          type: "category",
+          data: values.map((item) => item.label),
+          axisLabel: { color: "#6f7684", fontSize: 10 }
+        },
+        yAxis: {
+          type: "value",
+          max: isPercentage ? 100 : undefined,
+          axisLabel: { color: "#6f7684", fontSize: 10, formatter: isPercentage ? "{value}%" : "{value}" }
+        },
+        series: [{
+          type: "line",
+          data: values.map((item) => item.value),
+          smooth: true,
+          symbolSize: 8,
+          itemStyle: { color: "#d6a400" },
+          lineStyle: { color: "#d6a400", width: 2.5 }
+        }]
+      };
+    } else {
+      option = {
+        ...common,
+        grid: { left: 8, right: 28, top: 8, bottom: 8, containLabel: true },
+        xAxis: {
+          type: "value",
+          max: isPercentage ? 100 : undefined,
+          axisLabel: { color: "#6f7684", fontSize: 10, formatter: isPercentage ? "{value}%" : "{value}" },
+          splitLine: { lineStyle: { color: "#e5e7eb" } }
+        },
+        yAxis: {
+          type: "category",
+          inverse: true,
+          data: values.map((item) => item.label),
+          axisLabel: { color: "#334155", fontSize: 10, width: 100, overflow: "truncate" },
+          axisLine: { show: false },
+          axisTick: { show: false }
+        },
+        series: [{
+          type: "bar",
+          data: values.map((item) => item.value),
+          barMaxWidth: 18,
+          itemStyle: { color: "#d6a400", borderRadius: [0, 3, 3, 0] },
+          label: { show: true, position: "right", color: "#1d1d1b", fontSize: 10, formatter: (params: { dataIndex: number }) => values[params.dataIndex]?.display || "-" }
+        }]
+      };
+    }
     chart.setOption(option);
     const resize = () => chart.resize();
     window.addEventListener("resize", resize);
     return () => { window.removeEventListener("resize", resize); chart.dispose(); };
-  }, [rows, visual.visual_type]);
-  if (error) return <article className="data-preview-card"><h3>{visual.title}</h3><p>{error}</p></article>;
-  if (!table) return <article className="data-preview-card"><h3>{visual.title}</h3><p>正在读取已验证数据...</p></article>;
-  return <article className="data-preview-card"><div><div className="section-kicker">{visual.visual_type.toUpperCase()}</div><div className="preview-card-title"><h3>{visual.title}</h3><button className="text-button" onClick={() => setShowAll((current) => !current)}>{showAll ? "收起" : `显示全部 ${allRows.length} 项`}</button></div>{base && <small>Base: {base.cells[0]?.excel_display_value || "-"}</small>}</div>{visual.visual_type === "data_table" ? <div className="preview-bars">{rows.map((row) => <div className="preview-bar-row" key={row.extracted_row_id}><span title={row.original_label}>{row.original_label}</span><strong>{row.cells[0]?.excel_display_value || "-"}</strong></div>)}</div> : <div className="echarts-preview" ref={chartRef} aria-label={`${visual.title} ${visual.visual_type}`} />}<div className="draft-visual-evidence"><Database size={14} /><span>{table.source_range}</span></div></article>;
+  }, [rows, effectiveVisualType, effectivePrecision, effectiveTitle]);
+
+  if (error) return <article className="data-preview-card"><h3>{effectiveTitle}</h3><p>{error}</p></article>;
+  if (!table) return <article className="data-preview-card"><h3>{effectiveTitle}</h3><p>正在读取已验证数据...</p></article>;
+
+  return (
+    <article className="data-preview-card" style={{ border: isEditMode ? "2px dashed #d6a400" : undefined, position: "relative" }}>
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div className="section-kicker" style={{ margin: 0 }}>{effectiveVisualType.toUpperCase()}</div>
+          {isEditMode && onUpdateOverride && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <select
+                aria-label="切换图表类型"
+                value={effectiveVisualType}
+                onChange={(e) => onUpdateOverride({ visualType: e.target.value })}
+                style={{ padding: "3px 8px", fontSize: "11px", fontWeight: 600, borderRadius: "4px", border: "1px solid #d6a400", backgroundColor: "#fff9e6" }}
+              >
+                {visualChoices.map(([val, lbl]) => (
+                  <option key={val} value={val}>{lbl}</option>
+                ))}
+              </select>
+              <select
+                aria-label="小数精度"
+                value={effectivePrecision}
+                onChange={(e) => onUpdateOverride({ precision: Number(e.target.value) })}
+                style={{ padding: "3px 6px", fontSize: "11px", borderRadius: "4px", border: "1px solid #cbd5e1" }}
+              >
+                <option value={0}>整数 (0位)</option>
+                <option value={1}>1位小数</option>
+                <option value={2}>2位小数</option>
+              </select>
+            </div>
+          )}
+        </div>
+
+        <div className="preview-card-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          {isEditMode && onUpdateOverride ? (
+            <input
+              type="text"
+              value={effectiveTitle}
+              onChange={(e) => onUpdateOverride({ title: e.target.value })}
+              style={{
+                fontSize: "15px",
+                fontWeight: 700,
+                color: "#1d1d1b",
+                border: "1px solid #cbd5e1",
+                padding: "3px 8px",
+                borderRadius: "4px",
+                flex: 1,
+                backgroundColor: "#ffffff"
+              }}
+              placeholder="自定义图表标题..."
+            />
+          ) : (
+            <h3>{effectiveTitle}</h3>
+          )}
+          <button className="text-button" onClick={() => setShowAll((current) => !current)}>
+            {showAll ? "收起" : `显示全部 ${allRows.length} 项`}
+          </button>
+        </div>
+        {base && <small>Base: {base.cells[0]?.excel_display_value || "-"}</small>}
+      </div>
+
+      {effectiveVisualType === "data_table" ? (
+        <div className="preview-bars">
+          {rows.map((row) => (
+            <div className="preview-bar-row" key={row.extracted_row_id}>
+              <span title={row.original_label}>{row.original_label}</span>
+              <strong>{row.cells[0]?.excel_display_value || "-"}</strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="echarts-preview" ref={chartRef} aria-label={`${effectiveTitle} ${effectiveVisualType}`} />
+      )}
+
+      <div className="draft-visual-evidence">
+        <Database size={14} />
+        <span>{table.source_range}</span>
+      </div>
+    </article>
+  );
 }
 
 function WorkflowPanel({ activeView, fileVersions, processingJob, recognitionResult, extractionTables, tableDirectory, tableDirectoryTotal, tableDirectoryPage, loadingTableId, onOpenTable, onChangeTablePage, dashboardDraft, dashboardGenerating, onGenerateDraft, reviewIssues, explorerDetail, setExplorerDetail, onResolveReviewIssue, setShowUpload, selectedSheet, setSelectedSheet, setSelectedVersionDetails, query, setQuery, statusFilter, setStatusFilter, onRefresh }: { activeView: Exclude<WorkflowView, "overview">; fileVersions: FileVersion[]; processingJob: ProcessingJob | null; recognitionResult: RecognitionResult | null; extractionTables: ExtractedTable[]; tableDirectory: ExtractedTableSummary[]; tableDirectoryTotal: number; tableDirectoryPage: number; loadingTableId: string; onOpenTable: (tableId: string) => void; onChangeTablePage: (page: number) => void; dashboardDraft: DashboardDraft | null; dashboardGenerating: boolean; onGenerateDraft: (options?: DashboardDraftOptions) => void; reviewIssues: ReviewIssue[]; explorerDetail: ExplorerDetail; setExplorerDetail: (detail: ExplorerDetail) => void; onResolveReviewIssue: (issue: ReviewIssue, creatorNote?: string) => void; setShowUpload: (open: boolean) => void; selectedSheet: string; setSelectedSheet: (sheet: string) => void; setSelectedVersionDetails: (version: FileVersion) => void; query: string; setQuery: (value: string) => void; statusFilter: "全部状态" | Status; setStatusFilter: (value: "全部状态" | Status) => void; onRefresh: () => void }) {
