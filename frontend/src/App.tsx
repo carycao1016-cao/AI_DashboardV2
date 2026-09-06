@@ -135,6 +135,17 @@ type ReviewIssue = {
   blocks_publication: boolean;
 };
 
+type BatteryBrandMetric = {
+  entity: string;
+  table_id: string;
+  source_range: string;
+  metric_key: string;
+  metric_name: string;
+  value: number;
+  display: string;
+  is_percentage: boolean;
+};
+
 type DashboardVisual = {
   dashboard_visual_id: string;
   source_extracted_table_id: string;
@@ -144,6 +155,16 @@ type DashboardVisual = {
   grid_span: number;
   review_status: string;
   evidence: { source_ranges?: string[] };
+  is_battery_group?: boolean;
+  battery_group_id?: string;
+  battery_stem?: string;
+  battery_entities?: string[];
+  recommended_metric?: string;
+  recommended_metric_label?: string;
+  available_metrics?: Array<{ key: string; label: string }>;
+  aggregated_data?: BatteryBrandMetric[];
+  radar_dimensions?: string[];
+  radar_series?: Array<{ name: string; value: number[] }>;
 };
 
 type DashboardDraft = {
@@ -156,8 +177,140 @@ type DashboardDraft = {
   pages: Array<{ dashboard_page_id: string; category: "core" | "suggested" | "appendix" | "internal"; title: string; sort_order: number; visuals: DashboardVisual[] }>;
   summary: { tables_detected: number; semantic_questions: number; tables_in_draft: number; blocking_issues: number; review_required: number };
   warnings: string[];
-  semantic_questions?: Array<{ semantic_question_id: string; source_extracted_table_ids: string[]; title: string; module_name: string; metric_type: string; metric_source?: string; review_status: string; ai_recommended?: boolean; included_in_draft?: boolean; recommended_visual?: string; planning_source?: string; planning_confidence?: number; planning_reason?: string; template_matches?: Array<{ template: string; reason: string }>; evidence: { source_ranges?: string[] } }>;
+  semantic_questions?: Array<{
+    semantic_question_id: string;
+    source_extracted_table_ids: string[];
+    title: string;
+    module_name: string;
+    metric_type: string;
+    metric_source?: string;
+    review_status: string;
+    ai_recommended?: boolean;
+    included_in_draft?: boolean;
+    recommended_visual?: string;
+    planning_source?: string;
+    planning_confidence?: number;
+    planning_reason?: string;
+    template_matches?: Array<{ template: string; reason: string }>;
+    evidence: { source_ranges?: string[] };
+    is_battery_group?: boolean;
+    battery_group_id?: string;
+    battery_stem?: string;
+    battery_entities?: string[];
+    recommended_metric?: string;
+    recommended_metric_label?: string;
+    available_metrics?: Array<{ key: string; label: string }>;
+    aggregated_data?: BatteryBrandMetric[];
+  }>;
 };
+
+function isSummaryOrStatisticRow(label: string, detectedRowType?: string): boolean {
+  if (!label) return false;
+  const normalized = label.trim().toLowerCase();
+  if (
+    detectedRowType === "base" ||
+    normalized.startsWith("base:") ||
+    normalized.startsWith("base ") ||
+    normalized === "base" ||
+    normalized.includes("sample size") ||
+    normalized.includes("样本量") ||
+    normalized.startsWith("unweighted base") ||
+    normalized.startsWith("weighted base")
+  ) {
+    return true;
+  }
+  if (
+    normalized === "sigma" ||
+    normalized.startsWith("sigma ") ||
+    normalized.startsWith("sigma:") ||
+    normalized.startsWith("sigma(") ||
+    normalized.includes("σ") ||
+    normalized === "total" ||
+    normalized.startsWith("total ") ||
+    normalized.startsWith("total:") ||
+    normalized.startsWith("total(") ||
+    normalized === "sum" ||
+    normalized === "总计" ||
+    normalized === "合计" ||
+    normalized === "net" ||
+    normalized.startsWith("net ") ||
+    normalized.startsWith("net:")
+  ) {
+    return true;
+  }
+  if (
+    normalized === "mean" ||
+    normalized.startsWith("mean ") ||
+    normalized.startsWith("mean:") ||
+    normalized.startsWith("mean(") ||
+    normalized === "均值" ||
+    normalized === "平均值" ||
+    normalized === "平均分" ||
+    normalized === "average" ||
+    normalized.startsWith("average ") ||
+    normalized === "median" ||
+    normalized === "media" ||
+    normalized.startsWith("median ") ||
+    normalized.startsWith("media ") ||
+    normalized === "中位数" ||
+    normalized === "std dev" ||
+    normalized === "std.dev" ||
+    normalized === "std dev." ||
+    normalized === "standard deviation" ||
+    normalized === "标准差" ||
+    normalized.startsWith("std dev") ||
+    normalized.startsWith("std. dev") ||
+    normalized.startsWith("std.dev") ||
+    normalized === "sd" ||
+    normalized === "std err" ||
+    normalized === "std.err" ||
+    normalized === "std err." ||
+    normalized === "standard error" ||
+    normalized === "标准误" ||
+    normalized.startsWith("std err") ||
+    normalized.startsWith("std. err") ||
+    normalized.startsWith("std.err") ||
+    normalized === "se" ||
+    normalized === "variance" ||
+    normalized === "方差"
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isBoxScoreRow(label: string): boolean {
+  if (!label) return false;
+  const normalized = label.trim().toLowerCase();
+  return (
+    normalized.includes("top 1") ||
+    normalized.includes("top 2") ||
+    normalized.includes("top 3") ||
+    normalized.includes("top-1") ||
+    normalized.includes("top-2") ||
+    normalized.includes("top-3") ||
+    normalized.includes("top box") ||
+    normalized.includes("top-box") ||
+    normalized.includes("t2b") ||
+    normalized.includes("t1b") ||
+    normalized.includes("t3b") ||
+    normalized.includes("bottom 1") ||
+    normalized.includes("bottom 2") ||
+    normalized.includes("bottom 3") ||
+    normalized.includes("bottom-1") ||
+    normalized.includes("bottom-2") ||
+    normalized.includes("b2b") ||
+    normalized.includes("b1b") ||
+    normalized.includes("agree (4+5)") ||
+    normalized.includes("agree(4+5)") ||
+    normalized.includes("非常满意+满意") ||
+    normalized.includes("net positive")
+  );
+}
+
+function isPureDataRow(label: string, detectedRowType?: string): boolean {
+  return !isSummaryOrStatisticRow(label, detectedRowType) && !isBoxScoreRow(label);
+}
 
 type DashboardDraftOptions = {
   template?: string;
@@ -737,9 +890,17 @@ function DashboardDraftWorkspace({ draft, generating, onGenerate, visualOverride
   return <><section className="standalone-view dashboard-workspace"><div className="page-header"><div><div className="eyebrow">DASHBOARD DRAFT · {draft.template.toUpperCase()}</div><h1>{draft.dashboard_name}</h1><p>Draft v{draft.revision ?? 1} · AI 已纳入 {draft.summary.tables_in_draft} 张表；当前可选择 {selectedTableIds.size} 张。</p></div><button className="button secondary" onClick={saveScopeDraft} disabled={generating}><Sparkles size={15} />{generating ? "生成中" : "更新 Draft"}</button></div><section className="summary-grid" aria-label="Dashboard Draft 摘要"><SummaryCard label="识别表格" value={String(draft.summary.tables_detected)} meta="当前文件版本" icon={<Database size={18} />} tone="neutral" /><SummaryCard label="AI 纳入" value={String(draft.summary.tables_in_draft)} meta="可直接浏览" icon={<Sparkles size={18} />} tone="green" /><SummaryCard label="当前选择" value={String(selectedTableIds.size)} meta="保存后生成新版本" icon={<Check size={18} />} tone="yellow" /><SummaryCard label="低置信提示" value={String(draft.summary.review_required)} meta="不会阻止浏览 Draft" icon={<AlertTriangle size={18} />} tone="orange" /></section><div className="dashboard-builder"><aside className="dashboard-page-panel">{categories.map(([category, label]) => { const pages = draft.pages.filter((page) => page.category === category); return pages.length ? <div key={category}><div className="section-kicker">{label}</div>{pages.map((page) => <button key={page.dashboard_page_id} className={`dashboard-page-item ${selectedPage?.dashboard_page_id === page.dashboard_page_id ? "selected" : ""}`} onClick={() => setSelectedPageId(page.dashboard_page_id)}><span>{page.title}</span><small>{page.visuals.length}</small></button>)}</div> : null; })}</aside><section className="dashboard-canvas"><div className="card-heading"><div><div className="section-kicker">{selectedPage?.category ?? "DRAFT"}</div><h2>{selectedPage?.title ?? "暂无页面"}</h2></div><span className="status-badge status-success"><Sparkles size={12} />AI 推荐</span></div>{selectedPage?.visuals.length ? <div className="draft-visual-grid">{selectedPage.visuals.map((visual) => <article className="draft-visual" key={visual.dashboard_visual_id}><div><div className="section-kicker">{visual.visual_type === "data_table" ? "DATA TABLE" : visual.visual_type}</div><h3>{visual.title}</h3></div><span className={`status-badge ${visual.review_status === "review_required" ? "status-warning" : "status-success"}`}>{visual.review_status === "review_required" ? "保守展示" : "AI 推荐图表"}</span><div className="draft-visual-evidence"><Database size={14} /><span>{visual.evidence.source_ranges?.join(" · ") || visual.source_extracted_table_id}</span></div></article>)}</div> : <div className="empty-workflow"><div className="empty-icon"><BarChart3 size={23} /></div><h2>当前范围没有纳入内容</h2><p>请在下方选择要加入 Draft 的表格。</p></div>}</section></div><section className="workspace-card draft-setup-card"><div className="card-heading"><div><div className="section-kicker">DRAFT SETUP</div><h2>1. 选择内容范围</h2><p>AI 已按题目语义匹配模板并预选核心内容。选择完成后，在本区底部保存。</p></div><button className="text-button" onClick={setRecommendedScope}>恢复 AI 推荐</button></div><div className="template-match-summary"><Sparkles size={15} /><span>AI 匹配模板：{matchedTemplates.length ? matchedTemplates.join("、") : "暂无明确模板"}</span></div><div className="content-selection-list">{semanticQuestions.map((question) => { const tableId = question.source_extracted_table_ids[0]; return <label key={question.semantic_question_id} className={selectedTableIds.has(tableId) ? "selected" : ""}><input type="checkbox" checked={selectedTableIds.has(tableId)} onChange={() => toggleTable(tableId)} /><span><strong>{question.title}</strong><small>{question.module_name} · {question.evidence.source_ranges?.join(" · ")}</small></span>{question.ai_recommended && <em>AI 推荐</em>}</label>; })}</div><div className="draft-action-bar"><span>已选择 {selectedTableIds.size} 项 · 图形修改会随新 Draft 版本保存</span><button className="button primary" onClick={saveScopeDraft} disabled={generating}><Sparkles size={15} />{generating ? "正在更新" : "2. 保存并更新 Draft"}</button></div></section></section><PlanningReviewPanel draft={draft} visualOverrides={visualOverrides} onVisualChange={onVisualChange} onSave={saveGraphDraft} generating={generating} /></>;
 }
 
+export interface VisualOverrideConfig {
+  visualType?: string;
+  title?: string;
+  precision?: number;
+  chartHeight?: number;
+  gridSpan?: 1 | 2;
+}
+
 function DashboardPreviewWorkspace({ draft }: { draft: DashboardDraft | null }) {
   const [previewEditMode, setPreviewEditMode] = useState(false);
-  const [localOverrides, setLocalOverrides] = useState<Record<string, { visualType?: string; title?: string; precision?: number }>>({});
+  const [localOverrides, setLocalOverrides] = useState<Record<string, VisualOverrideConfig>>({});
 
   if (!draft) return <section className="standalone-view"><div className="page-header"><div><div className="eyebrow">DASHBOARD PREVIEW</div><h1>尚未生成 Dashboard Draft</h1><p>先在 Dashboard Draft 中完成 AI 规划和内容范围选择。</p></div></div></section>;
   
@@ -751,8 +912,8 @@ function DashboardPreviewWorkspace({ draft }: { draft: DashboardDraft | null }) 
           <h1>{draft.dashboard_name}</h1>
           <p>
             {previewEditMode 
-              ? "当前处于【编辑模式】：您可以直接修改图表类型、卡片标题及数值精度。" 
-              : "这里集中查看所有已纳入 Draft 的页面和图表；点击右侧按钮可直接进入编辑模式。"}
+              ? "当前处于【编辑模式】：支持即时更改图形、对比指标切片、自定义画布高度及通栏布局。" 
+              : "集中查看所有已纳入 Draft 的页面和图表。支持每个图表独立调节高度与通栏，点击右侧进入编辑模式。"}
           </p>
         </div>
         <div className="preview-header-actions" style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -844,19 +1005,45 @@ function DashboardDataPreviewItem({
   draft: DashboardDraft; 
   visual: DashboardVisual; 
   isEditMode?: boolean; 
-  override?: { visualType?: string; title?: string; precision?: number }; 
-  onUpdateOverride?: (upd: { visualType?: string; title?: string; precision?: number }) => void;
+  override?: VisualOverrideConfig; 
+  onUpdateOverride?: (upd: VisualOverrideConfig) => void;
 }) {
   const [table, setTable] = useState<ExtractedTable | null>(null);
   const [error, setError] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [activeMetricKey, setActiveMetricKey] = useState<string>(
+    visual.recommended_metric || "top_2_box"
+  );
   const chartRef = useRef<HTMLDivElement | null>(null);
 
   const effectiveVisualType = override?.visualType || visual.visual_type;
   const effectiveTitle = override?.title !== undefined ? override.title : visual.title;
   const effectivePrecision = override?.precision !== undefined ? override.precision : (visual.display_precision ?? 1);
 
+  // 严格品牌过滤：彻底剔除 Sigma、Total、Base、Net、Mean 等统计行
+  const isInvalidBrand = (name: string | null | undefined): boolean => {
+    if (!name) return true;
+    const s = name.trim().toLowerCase();
+    return (
+      isSummaryOrStatisticRow(s) ||
+      s.includes("sigma") ||
+      s.includes("σ") ||
+      s === "total" ||
+      s === "base" ||
+      s === "net" ||
+      s === "sum" ||
+      s === "mean" ||
+      s === "median" ||
+      s === "未知品牌"
+    );
+  };
+
+  // 如果是联合多维雷达图或题组对比，则可能没有单个物理表请求或需要从主表读取
   useEffect(() => {
+    if (visual.radar_series && visual.radar_dimensions) {
+      // 联合雷达图无需从单个 table 读取
+      return;
+    }
     let active = true;
     setTable(null);
     setError("");
@@ -868,14 +1055,320 @@ function DashboardDataPreviewItem({
       })
       .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : "读取预览失败"); });
     return () => { active = false; };
-  }, [draft.project_id, draft.source_file_version_id, visual.source_extracted_table_id]);
+  }, [draft.project_id, draft.source_file_version_id, visual.source_extracted_table_id, visual.radar_series, visual.radar_dimensions]);
 
-  const base = table?.rows.find((row) => row.detected_row_type === "base" || row.original_label.toLowerCase().startsWith("base:"));
+  // 1. 题组跨品牌对比数据处理 (纯净品牌过滤与指标提取)
+  const isBattery = Boolean(visual.is_battery_group && visual.aggregated_data && visual.aggregated_data.length > 0);
+  const isMultiRadar = Boolean(visual.radar_series && visual.radar_dimensions && visual.radar_dimensions.length > 0);
+
+  // 提取题组当前有效品牌与指标数据
+  const rawBrandMetrics = (visual.aggregated_data || []).filter((m) => !isInvalidBrand(m.entity));
+  const currentMetricMatches = rawBrandMetrics.filter((m) => activeMetricKey ? m.metric_key === activeMetricKey : true);
+  const activeMetricsPool = currentMetricMatches.length > 0 ? currentMetricMatches : rawBrandMetrics;
+  
+  // 按品牌去重并降序排列
+  const uniqueBrandMap = new Map<string, typeof rawBrandMetrics[0]>();
+  activeMetricsPool.forEach((item) => {
+    const key = item.entity.toLowerCase();
+    if (!uniqueBrandMap.has(key)) {
+      uniqueBrandMap.set(key, item);
+    }
+  });
+  const batteryDisplayItems = Array.from(uniqueBrandMap.values()).sort((a, b) => b.value - a.value);
+
+  // 多维联合雷达图过滤有效品牌
+  const validRadarSeries = (visual.radar_series || []).filter((s) => !isInvalidBrand(s.name));
+  const validRadarDimensions = visual.radar_dimensions || [];
+
+  // 2. 单表物理行过滤（自动过滤 Base, Sigma, Total, Net, Mean, Median, Std Dev, Std Err, Variance 等）
+  const base = table?.rows.find((row) => isSummaryOrStatisticRow(row.original_label, row.detected_row_type));
   const allRows = table?.rows.filter((row) => row !== base) ?? [];
-  const rows = showAll ? allRows : allRows.slice(0, 5);
+  const pureRows = allRows.filter((row) => isPureDataRow(row.original_label, row.detected_row_type));
+  const chartRows = pureRows.length > 0 ? pureRows : allRows.filter((r) => !isSummaryOrStatisticRow(r.original_label, r.detected_row_type));
+  const rows = showAll ? chartRows : chartRows.slice(0, 10);
+
+  // 3. 画布大小独立自定义计算（支持高度与跨列宽度调节）
+  const defaultCalculatedHeight = isMultiRadar 
+    ? 400 
+    : isBattery 
+      ? Math.max(360, batteryDisplayItems.length * 38 + 60) 
+      : Math.max(340, rows.length * 34 + 60);
+
+  const effectiveHeight = override?.chartHeight || defaultCalculatedHeight;
+  const effectiveGridSpan = override?.gridSpan || (isMultiRadar ? 2 : visual.grid_span || 1);
 
   useEffect(() => {
-    if (!chartRef.current || !table || effectiveVisualType === "data_table") return;
+    if (!chartRef.current || effectiveVisualType === "data_table") return;
+
+    // A. 品牌多维感知雷达图 (支持多维联合雷达图及柱状图/条形图/折线图切换)
+    if (isMultiRadar && validRadarSeries.length > 0 && validRadarDimensions.length > 0) {
+      chartRef.current.style.height = `${effectiveHeight}px`;
+      const chart = initECharts(chartRef.current);
+      const palette = ["#d6a400", "#0284c7", "#10b981", "#8b5cf6", "#f97316", "#ec4899", "#1d1d1b"];
+      let option: any = null;
+
+      if (effectiveVisualType === "bar" || effectiveVisualType === "grouped_bar") {
+        option = {
+          color: palette,
+          tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+          legend: { top: 8, type: "scroll" },
+          grid: { left: "4%", right: "4%", bottom: "12%", top: 50, containLabel: true },
+          xAxis: { type: "category", data: validRadarDimensions, axisLabel: { interval: 0, rotate: validRadarDimensions.length > 5 ? 25 : 0, fontSize: 11 } },
+          yAxis: { type: "value", max: 100, axisLabel: { formatter: "{value}%" } },
+          series: validRadarSeries.map((s) => ({
+            name: s.name,
+            type: "bar",
+            barMaxWidth: 24,
+            data: s.data,
+            label: { show: true, position: "top", formatter: (p: any) => `${Number(p.value).toFixed(effectivePrecision)}%`, fontSize: 10 },
+          })),
+        };
+      } else if (effectiveVisualType === "horizontal_bar") {
+        option = {
+          color: palette,
+          tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+          legend: { top: 8, type: "scroll" },
+          grid: { left: "4%", right: "6%", bottom: "6%", top: 50, containLabel: true },
+          xAxis: { type: "value", max: 100, axisLabel: { formatter: "{value}%" } },
+          yAxis: { type: "category", data: validRadarDimensions, inverse: true, axisLabel: { fontSize: 11 } },
+          series: validRadarSeries.map((s) => ({
+            name: s.name,
+            type: "bar",
+            barMaxWidth: 20,
+            data: s.data,
+            label: { show: true, position: "right", formatter: (p: any) => `${Number(p.value).toFixed(effectivePrecision)}%`, fontSize: 10 },
+          })),
+        };
+      } else if (effectiveVisualType === "line") {
+        option = {
+          color: palette,
+          tooltip: { trigger: "axis" },
+          legend: { top: 8, type: "scroll" },
+          grid: { left: "4%", right: "4%", bottom: "10%", top: 50, containLabel: true },
+          xAxis: { type: "category", data: validRadarDimensions, axisLabel: { interval: 0, rotate: 25, fontSize: 11 } },
+          yAxis: { type: "value", max: 100, axisLabel: { formatter: "{value}%" } },
+          series: validRadarSeries.map((s) => ({
+            name: s.name,
+            type: "line",
+            data: s.data,
+            smooth: true,
+            symbolSize: 6,
+            label: { show: true, position: "top", formatter: (p: any) => `${Number(p.value).toFixed(effectivePrecision)}%`, fontSize: 10 },
+          })),
+        };
+      } else {
+        option = {
+          color: palette,
+          tooltip: { trigger: "item" },
+          legend: {
+            orient: "horizontal",
+            top: 4,
+            textStyle: { fontSize: 11 },
+            type: "scroll",
+          },
+          radar: {
+            indicator: validRadarDimensions.map((dim) => ({
+              name: dim,
+              max: 100,
+            })),
+            radius: "62%",
+            center: ["50%", "56%"],
+            axisName: { color: "#334155", fontSize: 11, fontWeight: 600 },
+            splitArea: {
+              areaStyle: {
+                color: ["rgba(250,250,250,0.8)", "rgba(240,240,240,0.8)"],
+              },
+            },
+          },
+          series: [
+            {
+              type: "radar",
+              data: validRadarSeries.map((s, idx) => ({
+                name: s.name,
+                value: s.data,
+                itemStyle: { color: palette[idx % palette.length] },
+                lineStyle: { width: 2.5 },
+                areaStyle: { opacity: idx === 0 ? 0.25 : 0.08 },
+              })),
+            },
+          ],
+        };
+      }
+
+      chart.setOption(option);
+      const resize = () => chart.resize();
+      window.addEventListener("resize", resize);
+      return () => {
+        window.removeEventListener("resize", resize);
+        chart.dispose();
+      };
+    }
+
+    // B. 题组跨品牌对比 (支持柱状图、条形图、雷达图、饼图、折线图等所有类型，切片器联动)
+    if (isBattery && batteryDisplayItems.length > 0) {
+      chartRef.current.style.height = `${effectiveHeight}px`;
+      const chart = initECharts(chartRef.current);
+      const precision = Math.max(0, Math.min(3, effectivePrecision));
+      const formatVal = (v: number, pct: boolean) => `${v.toFixed(precision)}${pct ? "%" : ""}`;
+      const isPct = batteryDisplayItems[0]?.is_percentage ?? true;
+      const brands = batteryDisplayItems.map((d) => d.entity);
+      const values = batteryDisplayItems.map((d) => d.value);
+
+      const palette = ["#d6a400", "#0284c7", "#10b981", "#8b5cf6", "#f97316", "#ec4899", "#14b8a6", "#6366f1", "#1d1d1b"];
+      let option: any = null;
+
+      if (effectiveVisualType === "bar") {
+        option = {
+          color: ["#d6a400"],
+          tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, formatter: (p: any) => `${p[0].name}: <strong>${formatVal(Number(p[0].value), isPct)}</strong>` },
+          grid: { left: "4%", right: "4%", bottom: "12%", top: 36, containLabel: true },
+          xAxis: { type: "category", data: brands, axisLabel: { interval: 0, rotate: brands.length > 6 ? 25 : 0, fontSize: 11, fontWeight: 500 } },
+          yAxis: { type: "value", axisLabel: { formatter: isPct ? "{value}%" : "{value}" } },
+          series: [
+            {
+              type: "bar",
+              barMaxWidth: 38,
+              data: values.map((val, idx) => ({
+                value: val,
+                itemStyle: { color: idx === 0 ? "#b45309" : "#d6a400", borderRadius: [4, 4, 0, 0] },
+              })),
+              label: {
+                show: true,
+                position: "top",
+                formatter: (p: any) => formatVal(Number(p.value), isPct),
+                fontWeight: 600,
+                fontSize: 11,
+              },
+            },
+          ],
+        };
+      } else if (effectiveVisualType === "pie" || effectiveVisualType === "donut") {
+        option = {
+          color: palette,
+          tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
+          legend: { orient: "horizontal", top: 6, type: "scroll" },
+          series: [
+            {
+              type: "pie",
+              radius: effectiveVisualType === "donut" ? ["40%", "68%"] : "65%",
+              center: ["50%", "56%"],
+              data: batteryDisplayItems.map((d) => ({ name: d.entity, value: d.value })),
+              label: {
+                show: true,
+                formatter: `{b}: {c}${isPct ? "%" : ""}`,
+                fontSize: 11,
+              },
+            },
+          ],
+        };
+      } else if (effectiveVisualType === "radar") {
+        const maxVal = Math.max(...values, 10) * 1.15;
+        option = {
+          color: ["#d6a400"],
+          tooltip: { trigger: "item" },
+          radar: {
+            indicator: brands.map((b) => ({ name: b, max: Math.ceil(maxVal) })),
+            radius: "64%",
+            center: ["50%", "52%"],
+            axisName: { color: "#1e293b", fontSize: 11, fontWeight: 600 },
+          },
+          series: [
+            {
+              type: "radar",
+              data: [
+                {
+                  value: values,
+                  name: activeMetricKey.toUpperCase(),
+                  symbol: "circle",
+                  symbolSize: 6,
+                  areaStyle: { color: "rgba(214, 164, 0, 0.3)" },
+                  lineStyle: { width: 3, color: "#d6a400" },
+                },
+              ],
+            },
+          ],
+        };
+      } else if (effectiveVisualType === "line") {
+        option = {
+          color: ["#d6a400"],
+          tooltip: { trigger: "axis" },
+          grid: { left: "4%", right: "4%", bottom: "10%", top: 36, containLabel: true },
+          xAxis: { type: "category", data: brands, axisLabel: { interval: 0, rotate: 20, fontSize: 11 } },
+          yAxis: { type: "value", axisLabel: { formatter: isPct ? "{value}%" : "{value}" } },
+          series: [
+            {
+              type: "line",
+              data: values,
+              smooth: true,
+              symbol: "circle",
+              symbolSize: 8,
+              lineStyle: { width: 3, color: "#d6a400" },
+              itemStyle: { color: "#b45309" },
+              label: { show: true, position: "top", formatter: (p: any) => formatVal(Number(p.value), isPct), fontWeight: 600 },
+            },
+          ],
+        };
+      } else {
+        // 默认及 horizontal_bar / grouped_bar
+        option = {
+          tooltip: {
+            trigger: "axis",
+            axisPointer: { type: "shadow" },
+            formatter: (params: any) => {
+              const p = Array.isArray(params) ? params[0] : params;
+              return `${p.name}<br/>${p.seriesName}: <strong>${formatVal(Number(p.value), isPct)}</strong>`;
+            },
+          },
+          grid: { left: 16, right: 36, top: 16, bottom: 16, containLabel: true },
+          xAxis: {
+            type: "value",
+            max: isPct ? 100 : undefined,
+            axisLabel: { color: "#6f7684", fontSize: 10, formatter: isPct ? "{value}%" : "{value}" },
+            splitLine: { lineStyle: { color: "#f1f5f9" } },
+          },
+          yAxis: {
+            type: "category",
+            inverse: true,
+            data: brands,
+            axisLabel: { color: "#1e293b", fontSize: 11, fontWeight: 600 },
+            axisLine: { show: false },
+            axisTick: { show: false },
+          },
+          series: [
+            {
+              name: batteryDisplayItems[0]?.metric_name || "品牌得分",
+              type: "bar",
+              data: values,
+              barMaxWidth: 24,
+              itemStyle: {
+                color: "#d6a400",
+                borderRadius: [0, 4, 4, 0],
+              },
+              label: {
+                show: true,
+                position: "right",
+                color: "#1d1d1b",
+                fontSize: 11,
+                fontWeight: 600,
+                formatter: (params: { dataIndex: number }) =>
+                  batteryDisplayItems[params.dataIndex]?.display || formatVal(batteryDisplayItems[params.dataIndex]?.value || 0, isPct),
+              },
+            },
+          ],
+        };
+      }
+
+      chart.setOption(option);
+      const resize = () => chart.resize();
+      window.addEventListener("resize", resize);
+      return () => {
+        window.removeEventListener("resize", resize);
+        chart.dispose();
+      };
+    }
+
+    // C. 单表标准图表（已彻底过滤 Sigma、Mean、Median、Std Dev、Std Err）
+    if (!table) return;
     const sourceTable = table;
     chartRef.current.style.height = `${Math.max(210, rows.length * 32 + 40)}px`;
     const chart = initECharts(chartRef.current);
@@ -1125,41 +1618,161 @@ function DashboardDataPreviewItem({
     const resize = () => chart.resize();
     window.addEventListener("resize", resize);
     return () => { window.removeEventListener("resize", resize); chart.dispose(); };
-  }, [rows, effectiveVisualType, effectivePrecision, effectiveTitle]);
+  }, [
+    rows, 
+    table, 
+    effectiveVisualType, 
+    effectivePrecision, 
+    effectiveTitle, 
+    effectiveHeight, 
+    isMultiRadar, 
+    isBattery, 
+    activeMetricKey, 
+    batteryDisplayItems, 
+    validRadarSeries, 
+    validRadarDimensions
+  ]);
 
   if (error) return <article className="data-preview-card"><h3>{effectiveTitle}</h3><p>{error}</p></article>;
-  if (!table) return <article className="data-preview-card"><h3>{effectiveTitle}</h3><p>正在读取已验证数据...</p></article>;
+  if (!table && !isMultiRadar && !isBattery) return <article className="data-preview-card"><h3>{effectiveTitle}</h3><p>正在读取已验证数据...</p></article>;
+
+  const cardClassName = `data-preview-card ${effectiveGridSpan === 2 ? "col-span-2" : "col-span-1"}`;
 
   return (
-    <article className="data-preview-card" style={{ border: isEditMode ? "2px dashed #d6a400" : undefined, position: "relative" }}>
+    <article 
+      className={cardClassName} 
+      style={{ 
+        border: isEditMode ? "2px dashed #d6a400" : undefined, 
+        position: "relative",
+        minHeight: `${effectiveHeight + 110}px`
+      }}
+    >
       <div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <div className="section-kicker" style={{ margin: 0 }}>{effectiveVisualType.toUpperCase()}</div>
-          {isEditMode && onUpdateOverride && (
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <select
-                aria-label="切换图表类型"
-                value={effectiveVisualType}
-                onChange={(e) => onUpdateOverride({ visualType: e.target.value })}
-                style={{ padding: "3px 8px", fontSize: "11px", fontWeight: 600, borderRadius: "4px", border: "1px solid #d6a400", backgroundColor: "#fff9e6" }}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <span className="section-kicker" style={{ margin: 0 }}>{effectiveVisualType.toUpperCase()}</span>
+            {isBattery && (
+              <span style={{ fontSize: "11px", backgroundColor: "#fef3c7", color: "#92400e", padding: "2px 8px", borderRadius: "12px", fontWeight: 700 }}>
+                跨品牌题组对比
+              </span>
+            )}
+            {isMultiRadar && (
+              <span style={{ fontSize: "11px", backgroundColor: "#e0e7ff", color: "#3730a3", padding: "2px 8px", borderRadius: "12px", fontWeight: 700 }}>
+                多维属性联合雷达
+              </span>
+            )}
+          </div>
+
+          {/* 右侧独立控制条：图表类型、精度、独立画布高度、通栏宽度 */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            {isEditMode && onUpdateOverride && (
+              <>
+                <select
+                  aria-label="切换图表类型"
+                  value={effectiveVisualType}
+                  onChange={(e) => onUpdateOverride({ visualType: e.target.value })}
+                  style={{ padding: "4px 8px", fontSize: "11px", fontWeight: 700, borderRadius: "4px", border: "1px solid #d6a400", backgroundColor: "#fff9e6", cursor: "pointer" }}
+                >
+                  {visualChoices.map(([val, lbl]) => (
+                    <option key={val} value={val}>{lbl}</option>
+                  ))}
+                </select>
+                <select
+                  aria-label="小数精度"
+                  value={effectivePrecision}
+                  onChange={(e) => onUpdateOverride({ precision: Number(e.target.value) })}
+                  style={{ padding: "4px 6px", fontSize: "11px", borderRadius: "4px", border: "1px solid #cbd5e1" }}
+                >
+                  <option value={0}>整数 (0位)</option>
+                  <option value={1}>1位小数</option>
+                  <option value={2}>2位小数</option>
+                </select>
+              </>
+            )}
+
+            {/* 画布高度独立自定义调节 */}
+            {onUpdateOverride && (
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 4, backgroundColor: "#f1f5f9", padding: "2px 6px", borderRadius: "4px", border: "1px solid #e2e8f0" }}>
+                <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 600 }}>高度:</span>
+                <button
+                  type="button"
+                  title="减小高度 (-40px)"
+                  onClick={() => onUpdateOverride({ chartHeight: Math.max(240, effectiveHeight - 40) })}
+                  style={{ padding: "1px 5px", fontSize: "11px", border: "1px solid #cbd5e1", borderRadius: "3px", backgroundColor: "#ffffff", cursor: "pointer", fontWeight: 700 }}
+                >
+                  -
+                </button>
+                <span style={{ fontSize: "11px", fontFamily: "monospace", minWidth: "36px", textAlign: "center", fontWeight: 600 }}>
+                  {effectiveHeight}
+                </span>
+                <button
+                  type="button"
+                  title="增大高度 (+40px)"
+                  onClick={() => onUpdateOverride({ chartHeight: Math.min(900, effectiveHeight + 40) })}
+                  style={{ padding: "1px 5px", fontSize: "11px", border: "1px solid #cbd5e1", borderRadius: "3px", backgroundColor: "#ffffff", cursor: "pointer", fontWeight: 700 }}
+                >
+                  +
+                </button>
+              </div>
+            )}
+
+            {/* 画布宽度独立通栏切换 */}
+            {onUpdateOverride && (
+              <button
+                type="button"
+                title={effectiveGridSpan === 2 ? "切换为标准半宽 (50%)" : "切换为全宽通栏 (100%)"}
+                onClick={() => onUpdateOverride({ gridSpan: effectiveGridSpan === 2 ? 1 : 2 })}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "4px 8px",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  borderRadius: "4px",
+                  border: effectiveGridSpan === 2 ? "1px solid #d6a400" : "1px solid #cbd5e1",
+                  backgroundColor: effectiveGridSpan === 2 ? "#fef3c7" : "#ffffff",
+                  color: effectiveGridSpan === 2 ? "#92400e" : "#475569",
+                  cursor: "pointer",
+                }}
               >
-                {visualChoices.map(([val, lbl]) => (
-                  <option key={val} value={val}>{lbl}</option>
-                ))}
-              </select>
-              <select
-                aria-label="小数精度"
-                value={effectivePrecision}
-                onChange={(e) => onUpdateOverride({ precision: Number(e.target.value) })}
-                style={{ padding: "3px 6px", fontSize: "11px", borderRadius: "4px", border: "1px solid #cbd5e1" }}
-              >
-                <option value={0}>整数 (0位)</option>
-                <option value={1}>1位小数</option>
-                <option value={2}>2位小数</option>
-              </select>
-            </div>
-          )}
+                {effectiveGridSpan === 2 ? "▭ 通栏全宽 (100%)" : "◫ 半宽 (50%)"}
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* 题组对比指标切片器按钮 (Top 1, Top 2, Top 3, Mean) */}
+        {isBattery && visual.available_metrics && visual.available_metrics.length > 1 && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "6px 0 10px 0", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "11px", color: "#475569", fontWeight: 700 }}>对比指标切片器:</span>
+            {visual.available_metrics.map((m) => {
+              const active = activeMetricKey === m.key;
+              return (
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => setActiveMetricKey(m.key)}
+                  style={{
+                    padding: "3px 10px",
+                    fontSize: "11px",
+                    borderRadius: "14px",
+                    border: active ? "1.5px solid #d6a400" : "1px solid #cbd5e1",
+                    backgroundColor: active ? "#fffbeb" : "#ffffff",
+                    color: active ? "#b45309" : "#334155",
+                    fontWeight: active ? 800 : 500,
+                    boxShadow: active ? "0 1px 4px rgba(214, 164, 0, 0.25)" : "none",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  {m.label}
+                  {active && " ✓"}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div className="preview-card-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           {isEditMode && onUpdateOverride ? (
@@ -1182,30 +1795,130 @@ function DashboardDataPreviewItem({
           ) : (
             <h3>{effectiveTitle}</h3>
           )}
-          <button className="text-button" onClick={() => setShowAll((current) => !current)}>
-            {showAll ? "收起" : `显示全部 ${allRows.length} 项`}
-          </button>
+          {!isMultiRadar && table && (
+            <button className="text-button" onClick={() => setShowAll((current) => !current)}>
+              {showAll ? "收起" : `查看底层表格 (${allRows.length}行，已自动过滤Sigma与汇总行)`}
+            </button>
+          )}
         </div>
-        {base && <small>Base: {base.cells[0]?.excel_display_value || "-"}</small>}
+
+        {table && !isMultiRadar && !isBattery && (
+          <div className="preview-card-meta">
+            <span>数据源: {visual.evidence.source_ranges?.join(" · ") || table.source_range}</span>
+            <span>{base?.original_label || "样本基数: 全部受访者"}</span>
+            <span style={{ color: "#10b981", fontWeight: 600 }}>✓ 选项Sigma/统计行已自动过滤</span>
+          </div>
+        )}
+
+        {isBattery && (
+          <div className="preview-card-meta">
+            <span>覆盖品牌: {batteryDisplayItems.map((d) => d.entity).join(", ") || "无"}</span>
+            <span style={{ color: "#10b981", fontWeight: 600 }}>✓ 选项Sigma及统计汇总行已自动过滤</span>
+            <span>当前指标: <strong>{visual.available_metrics?.find((m) => m.key === activeMetricKey)?.label || activeMetricKey}</strong></span>
+          </div>
+        )}
+
+        {isMultiRadar && (
+          <div className="preview-card-meta">
+            <span>多品牌多维联合画像</span>
+            <span>覆盖品牌: {validRadarSeries.map((s) => s.name).join(", ")}</span>
+            <span style={{ color: "#d6a400", fontWeight: 600 }}>优先基于 Top 2 Box 维度对比</span>
+          </div>
+        )}
       </div>
 
       {effectiveVisualType === "data_table" ? (
-        <div className="preview-bars">
-          {rows.map((row) => (
-            <div className="preview-bar-row" key={row.extracted_row_id}>
-              <span title={row.original_label}>{row.original_label}</span>
-              <strong>{row.cells[0]?.excel_display_value || "-"}</strong>
-            </div>
-          ))}
+        <div className="crosstab-sheet-table" style={{ marginTop: 8, overflowX: "auto" }}>
+          {isBattery ? (
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ width: 50 }}>排名</th>
+                  <th>品牌</th>
+                  <th>对比指标</th>
+                  <th style={{ textAlign: "right" }}>指标数值</th>
+                  <th>数据类型</th>
+                  <th>数据源位置</th>
+                </tr>
+              </thead>
+              <tbody>
+                {batteryDisplayItems.map((item, idx) => (
+                  <tr key={item.entity} style={{ backgroundColor: idx === 0 ? "#fffbeb" : undefined }}>
+                    <td style={{ fontWeight: 700, color: idx === 0 ? "#b45309" : "#64748b" }}>#{idx + 1}</td>
+                    <td style={{ fontWeight: 600, color: "#1e293b" }}>{item.entity}</td>
+                    <td>{visual.available_metrics?.find((m) => m.key === item.metric_key)?.label || item.metric_key}</td>
+                    <td style={{ textAlign: "right", fontWeight: 700, fontFamily: "monospace", color: "#b45309" }}>
+                      {item.is_percentage ? `${Number(item.value).toFixed(effectivePrecision)}%` : Number(item.value).toFixed(effectivePrecision)}
+                    </td>
+                    <td><span style={{ fontSize: "10px", padding: "1px 6px", borderRadius: "3px", backgroundColor: "#f1f5f9" }}>{item.is_percentage ? "百分比" : "均分"}</span></td>
+                    <td style={{ fontSize: "11px", color: "#64748b" }}>{item.source_range || item.table_id}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : table ? (
+            <table>
+              <thead>
+                <tr>
+                  <th>行标签 (已过滤Sigma与统计行)</th>
+                  {table.headers.slice(0, 8).map((header) => (
+                    <th key={header.extracted_header_id}>{header.display_label || header.header_path.join(" / ")}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.extracted_row_id}>
+                    <td style={{ fontWeight: 500 }}>{row.original_label}</td>
+                    {table.headers.slice(0, 8).map((header) => {
+                      const cell = row.cells.find((item) => item.extracted_header_id === header.extracted_header_id);
+                      return <td key={header.extracted_header_id} style={{ textAlign: "right" }}>{cell?.excel_display_value || "-"}</td>;
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : null}
         </div>
       ) : (
-        <div className="echarts-preview" ref={chartRef} aria-label={`${effectiveTitle} ${effectiveVisualType}`} />
+        <div ref={chartRef} style={{ width: "100%", height: `${effectiveHeight}px`, minHeight: "240px", marginTop: 4 }} />
       )}
 
-      <div className="draft-visual-evidence">
-        <Database size={14} />
-        <span>{table.source_range}</span>
-      </div>
+      {/* 展开的底层表格详细信息 */}
+      {showAll && table && effectiveVisualType !== "data_table" && (
+        <div className="crosstab-sheet-table" style={{ marginTop: 12, borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
+          <div style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: 6 }}>
+            底层表格全量数据（包含 Sigma、Mean、Std Dev 等统计行供参考）：
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>行标签</th>
+                {table.headers.slice(0, 6).map((header) => (
+                  <th key={header.extracted_header_id}>{header.display_label || header.header_path.join(" / ")}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {allRows.map((row) => {
+                const isStat = isSummaryOrStatisticRow(row.original_label, row.detected_row_type);
+                return (
+                  <tr key={row.extracted_row_id} style={{ backgroundColor: isStat ? "#f8fafc" : undefined }}>
+                    <td style={{ color: isStat ? "#64748b" : "#1e293b", fontWeight: isStat ? 600 : 400 }}>
+                      {row.original_label}
+                      {isStat && <span style={{ marginLeft: 6, fontSize: "9px", color: "#94a3b8" }}>[统计汇总行]</span>}
+                    </td>
+                    {table.headers.slice(0, 6).map((header) => {
+                      const cell = row.cells.find((item) => item.extracted_header_id === header.extracted_header_id);
+                      return <td key={header.extracted_header_id}>{cell?.excel_display_value || "-"}</td>;
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </article>
   );
 }

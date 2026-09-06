@@ -1,3 +1,10 @@
+import { isPureDataRow, isSummaryOrStatisticRow } from "./statistic_filter";
+import {
+  clusterTablesIntoBatteryGroups,
+  BatteryGroup,
+  BatteryBrandMetric,
+} from "./battery_grouper";
+
 export interface ExtractedCell {
   extracted_header_id: string;
   source_cell: string;
@@ -46,6 +53,25 @@ export interface DashboardVisual {
   grid_span: number;
   review_status: string;
   evidence: { source_ranges?: string[] };
+  is_battery_group?: boolean;
+  battery_group_id?: string;
+  battery_stem?: string;
+  battery_entities?: string[];
+  recommended_metric?: string;
+  recommended_metric_label?: string;
+  available_metrics?: Array<{ key: string; label: string }>;
+  aggregated_data?: Array<{
+    entity: string;
+    table_id: string;
+    source_range: string;
+    metric_key: string;
+    metric_name: string;
+    value: number;
+    display: string;
+    is_percentage: boolean;
+  }>;
+  radar_dimensions?: string[];
+  radar_series?: Array<{ name: string; value: number[] }>;
 }
 
 export interface SemanticQuestion {
@@ -64,6 +90,23 @@ export interface SemanticQuestion {
   planning_reason?: string;
   template_matches?: Array<{ template: string; reason: string }>;
   evidence: { source_ranges?: string[] };
+  is_battery_group?: boolean;
+  battery_group_id?: string;
+  battery_stem?: string;
+  battery_entities?: string[];
+  recommended_metric?: string;
+  recommended_metric_label?: string;
+  available_metrics?: Array<{ key: string; label: string }>;
+  aggregated_data?: Array<{
+    entity: string;
+    table_id: string;
+    source_range: string;
+    metric_key: string;
+    metric_name: string;
+    value: number;
+    display: string;
+    is_percentage: boolean;
+  }>;
 }
 
 export interface DashboardDraft {
@@ -134,14 +177,9 @@ export function planVisualForTable(table: ExtractedTable): PlanDecision {
   const qTitle = (table.detected_table_title || "").trim().toLowerCase();
   const fullText = `${qNum} ${qText} ${qTitle}`;
 
-  // 提取非 Base 行
-  const dataRows = (table.rows || []).filter(
-    (r) =>
-      r.detected_row_type !== "base" &&
-      !r.original_label.toLowerCase().startsWith("base:") &&
-      !r.original_label.toLowerCase().startsWith("total") &&
-      !r.original_label.toLowerCase().startsWith("sigma") &&
-      !r.original_label.toLowerCase().startsWith("net")
+  // 提取纯净分类选项行（自动过滤 Base, Sigma, Total, Net, Mean, Median, Std Dev, Std Err, Variance, Top/Bottom Box 等统计汇总行）
+  const dataRows = (table.rows || []).filter((r) =>
+    isPureDataRow(r.original_label, r.detected_row_type)
   );
   const optionCount = dataRows.length;
   const rowLabels = dataRows.map((r) => r.original_label.toLowerCase());
@@ -416,40 +454,148 @@ export function buildIntelligentDashboardDraft(
   const decisionsMap = new Map<string, PlanDecision>();
   const semanticQuestions: SemanticQuestion[] = [];
 
-  // 对每张表进行 AI 语义规划
+  // 1. 执行题组聚类（Battery Grouping）
+  const { batteryGroups, standaloneTables } = clusterTablesIntoBatteryGroups(tables);
+
+  // 2. 为每个题组生成跨品牌对比语义题目 (Battery Comparison Visual)
+  const batteryVisuals: DashboardVisual[] = [];
+  for (const bg of batteryGroups) {
+    const primaryTableId = bg.tables[0].extracted_table_id;
+    const chosenVisual = (overrides[primaryTableId] as VisualType) || bg.recommended_visual;
+    const sqId = `sq_${bg.battery_group_id}`;
+    const allTableIds = bg.tables.map((t) => t.extracted_table_id);
+    const isIncluded = selectedIds ? allTableIds.some((id) => selectedIds.has(id)) : true;
+
+    const batterySq: SemanticQuestion = {
+      semantic_question_id: sqId,
+      source_extracted_table_ids: allTableIds,
+      title: `${bg.stem_title} - 跨品牌对比 (${bg.recommended_metric_label})`,
+      module_name: "Brand Comparison & Ranking",
+      metric_type: "percentage",
+      metric_source: `Battery Group (${bg.recommended_metric_label})`,
+      review_status: "creator_confirmed",
+      ai_recommended: true,
+      included_in_draft: isIncluded,
+      recommended_visual: chosenVisual,
+      planning_source: overrides[primaryTableId] ? "creator_override" : "ai",
+      planning_confidence: 0.98,
+      planning_reason: overrides[primaryTableId]
+        ? "Creator 手动自定义图表类型"
+        : bg.planning_reason,
+      template_matches: [
+        { template: "Brand Tracking", reason: "跨品牌打分与表现梯队对比" },
+      ],
+      evidence: { source_ranges: bg.tables.map((t) => t.source_range) },
+      is_battery_group: true,
+      battery_group_id: bg.battery_group_id,
+      battery_stem: bg.stem_title,
+      battery_entities: bg.entities,
+      recommended_metric: bg.recommended_metric,
+      recommended_metric_label: bg.recommended_metric_label,
+      available_metrics: bg.available_metrics,
+      aggregated_data: bg.metrics_by_brand,
+    };
+    semanticQuestions.push(batterySq);
+
+    if (isIncluded) {
+      batteryVisuals.push({
+        dashboard_visual_id: `vis_${bg.battery_group_id}`,
+        source_extracted_table_id: primaryTableId,
+        visual_type: chosenVisual,
+        display_precision: 1,
+        title: `${bg.stem_title} - 跨品牌表现对比`,
+        grid_span: 1,
+        review_status: "creator_confirmed",
+        evidence: { source_ranges: bg.tables.map((t) => t.source_range) },
+        is_battery_group: true,
+        battery_group_id: bg.battery_group_id,
+        battery_stem: bg.stem_title,
+        battery_entities: bg.entities,
+        recommended_metric: bg.recommended_metric,
+        recommended_metric_label: bg.recommended_metric_label,
+        available_metrics: bg.available_metrics,
+        aggregated_data: bg.metrics_by_brand,
+      });
+    }
+  }
+
+  // 3. 如果识别出 >= 2 个题组，自动规划多维品牌形象雷达图 (Multi-Attribute Radar Chart)
+  if (batteryGroups.length >= 2) {
+    const radarDimensions = batteryGroups.map((bg) => bg.stem_title.replace(/^Q\d+[\._\s]*/i, ""));
+    // 提取所有唯一品牌
+    const allBrands = Array.from(new Set(batteryGroups.flatMap((bg) => bg.entities)));
+    const radarSeries = allBrands.slice(0, 6).map((brand) => {
+      const vals = batteryGroups.map((bg) => {
+        const item = bg.metrics_by_brand.find((m) => m.entity.toLowerCase() === brand.toLowerCase());
+        return item ? item.value : 0;
+      });
+      return { name: brand, value: vals };
+    });
+
+    const radarVisualId = `vis_radar_${batteryGroups[0].battery_group_id}`;
+    batteryVisuals.unshift({
+      dashboard_visual_id: radarVisualId,
+      source_extracted_table_id: batteryGroups[0].tables[0].extracted_table_id,
+      visual_type: "radar",
+      display_precision: 1,
+      title: "品牌多维属性感知与竞争力雷达图 (Brand Attributes Radar)",
+      grid_span: 2,
+      review_status: "creator_confirmed",
+      evidence: { source_ranges: batteryGroups.flatMap((bg) => bg.tables.map((t) => t.source_range)).slice(0, 8) },
+      is_battery_group: true,
+      battery_stem: "品牌多维属性总览",
+      radar_dimensions: radarDimensions,
+      radar_series: radarSeries,
+    });
+  }
+
+  // 4. 对独立表（以及题组底层物理表）进行 AI 语义规划
   tables.forEach((table) => {
     const decision = planVisualForTable(table);
     decisionsMap.set(table.extracted_table_id, decision);
 
-    const isSelected = selectedIds ? selectedIds.has(table.extracted_table_id) : decision.ai_recommended;
+    // 如果属于题组，则默认在 Core 汇总，底层表默认保留在 Suggested 详细分析页
+    const isPartOfBattery = batteryGroups.some((bg) =>
+      bg.tables.some((t) => t.extracted_table_id === table.extracted_table_id)
+    );
+
+    const isSelected = selectedIds
+      ? selectedIds.has(table.extracted_table_id)
+      : isPartOfBattery
+        ? false // 题组子表在概览页通过题组卡片汇总展现
+        : decision.ai_recommended;
+
     const chosenVisual = (overrides[table.extracted_table_id] as VisualType) || decision.recommended_visual;
-    const metricType = confirmations[table.extracted_table_id] || (table.table_variant === "percentage" ? "percentage" : "count");
+    const metricType =
+      confirmations[table.extracted_table_id] ||
+      (table.table_variant === "percentage" ? "percentage" : "count");
 
     semanticQuestions.push({
       semantic_question_id: `sq_${table.extracted_table_id}`,
       source_extracted_table_ids: [table.extracted_table_id],
       title: table.detected_question_text || table.detected_table_title || "分析指标",
-      module_name: decision.module_name,
+      module_name: isPartOfBattery ? "Brand Detailed Distribution" : decision.module_name,
       metric_type: metricType,
       metric_source: "Python Table Extractor",
       review_status: "creator_confirmed",
-      ai_recommended: decision.ai_recommended,
+      ai_recommended: isPartOfBattery ? false : decision.ai_recommended,
       included_in_draft: isSelected,
       recommended_visual: chosenVisual,
       planning_source: overrides[table.extracted_table_id] ? "creator_override" : "ai",
       planning_confidence: decision.planning_confidence,
       planning_reason: overrides[table.extracted_table_id]
         ? "Creator 手动自定义图表类型"
-        : decision.planning_reason,
+        : isPartOfBattery
+          ? "已由题组跨品牌对比卡片聚合汇总呈现，原始表归入底层详细分析"
+          : decision.planning_reason,
       template_matches: decision.template_matches,
       evidence: { source_ranges: [table.source_range] },
     });
   });
 
   // 按语义模块分流
-  const includedQuestions = semanticQuestions.filter((q) => q.included_in_draft);
+  const includedQuestions = semanticQuestions.filter((q) => q.included_in_draft && !q.is_battery_group);
 
-  // 1. Core 页面: 选取最具有代表性的 6-8 张核心表（覆盖人口学、漏斗、认知、画像等不同图表类型）
   const coreQuestions: SemanticQuestion[] = [];
   const funnelQuestions: SemanticQuestion[] = [];
   const imageryQuestions: SemanticQuestion[] = [];
@@ -469,17 +615,12 @@ export function buildIntelligentDashboardDraft(
     else detailedQuestions.push(q);
   }
 
-  // 构建多样化的 Core 概览页（保证不同图表类型的平衡呈现）
+  // 概览页：加入漏斗、人口学等独立分析
   if (demographicQuestions.length > 0) coreQuestions.push(...demographicQuestions.slice(0, 2));
   if (funnelQuestions.length > 0) coreQuestions.push(...funnelQuestions.slice(0, 1));
-  if (imageryQuestions.length > 0) coreQuestions.push(...imageryQuestions.slice(0, 2));
-  if (waveQuestions.length > 0) coreQuestions.push(...waveQuestions.slice(0, 2));
-  if (detailedQuestions.length > 0 && coreQuestions.length < 8) {
-    coreQuestions.push(...detailedQuestions.slice(0, 8 - coreQuestions.length));
-  }
-  // 如果依然为空，取前 6 项
-  if (coreQuestions.length === 0) {
-    coreQuestions.push(...includedQuestions.slice(0, 6));
+  if (waveQuestions.length > 0) coreQuestions.push(...waveQuestions.slice(0, 1));
+  if (detailedQuestions.length > 0 && coreQuestions.length < 4) {
+    coreQuestions.push(...detailedQuestions.slice(0, 4 - coreQuestions.length));
   }
 
   const coreIds = new Set(coreQuestions.map((q) => q.source_extracted_table_ids[0]));
@@ -500,23 +641,43 @@ export function buildIntelligentDashboardDraft(
     };
   };
 
+  // 组合 Core 页面视觉卡片：题组品牌对比卡片置顶 + 核心受众/漏斗图
+  const coreVisuals: DashboardVisual[] = [...batteryVisuals, ...coreQuestions.map(toVisual)];
+
   const pages = [
     {
       dashboard_page_id: "page_core",
       category: "core" as const,
-      title: "Core Brand & Audience (核心概览)",
+      title: "Core Brand & Audience (核心概览与品牌对比)",
       sort_order: 1,
-      visuals: coreQuestions.map(toVisual),
+      visuals: coreVisuals,
     },
   ];
 
-  if (remainingQuestions.length > 0) {
+  // 如果有题组子表或剩余表，生成详细分析页
+  const suggestedVisuals = [
+    ...remainingQuestions.map(toVisual),
+    ...tables
+      .filter((t) => batteryGroups.some((bg) => bg.tables.some((bgt) => bgt.extracted_table_id === t.extracted_table_id)))
+      .map((tbl) => ({
+        dashboard_visual_id: `vis_detail_${tbl.extracted_table_id}`,
+        source_extracted_table_id: tbl.extracted_table_id,
+        visual_type: "horizontal_bar",
+        display_precision: 1,
+        title: tbl.detected_question_text || tbl.detected_table_title,
+        grid_span: 1,
+        review_status: "creator_confirmed",
+        evidence: { source_ranges: [tbl.source_range] },
+      })),
+  ];
+
+  if (suggestedVisuals.length > 0) {
     pages.push({
       dashboard_page_id: "page_suggested",
       category: "suggested" as const,
-      title: "Detailed Results & Crosstabs (详细分析)",
+      title: "Detailed Results & Crosstabs (详细分布分析)",
       sort_order: 2,
-      visuals: remainingQuestions.map(toVisual),
+      visuals: suggestedVisuals.slice(0, 16),
     });
   }
 

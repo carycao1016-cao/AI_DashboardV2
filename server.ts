@@ -224,10 +224,180 @@ async function loadInitialSeedData() {
               { extracted_header_id: "h_02", source_cell: "D18", raw_value: 0.0, excel_display_value: "0.0%", parsed_value: 0.0, parsed_unit: "percentage", original_significance_marker: "", significance_mapping_status: "mapped" },
               { extracted_header_id: "h_03", source_cell: "F18", raw_value: 1.0, excel_display_value: "100.0%", parsed_value: 1.0, parsed_unit: "percentage", original_significance_marker: "B", significance_mapping_status: "mapped" },
             ]
+          },
+          {
+            extracted_row_id: "r_04",
+            original_label: "Sigma",
+            detected_row_type: "subtotal",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B19", raw_value: 1.0, excel_display_value: "100.0%", parsed_value: 1.0, parsed_unit: "percentage", original_significance_marker: "", significance_mapping_status: "not_applicable" },
+              { extracted_header_id: "h_02", source_cell: "D19", raw_value: 1.0, excel_display_value: "100.0%", parsed_value: 1.0, parsed_unit: "percentage", original_significance_marker: "", significance_mapping_status: "not_applicable" },
+              { extracted_header_id: "h_03", source_cell: "F19", raw_value: 1.0, excel_display_value: "100.0%", parsed_value: 1.0, parsed_unit: "percentage", original_significance_marker: "", significance_mapping_status: "not_applicable" },
+            ]
           }
         ]
       }
     ];
+  }
+
+  // 注入真实市场调研典型题组（用户指定：Q017 Meets_needs 与 Q018 Reliability 跨品牌对比与打分题，带 Top 2 Box、Mean、Sigma 等）
+  const hasBattery = sampleTables.some((t) => t.detected_question_text?.includes("Meets_needs"));
+  if (!hasBattery) {
+    const brands = [
+      { name: "Bosch", t2b: 0.814, t1b: 0.452, mean: 4.28, range: "A24:AW36" },
+      { name: "LG", t2b: 0.742, t1b: 0.381, mean: 4.05, range: "A40:AW52" },
+      { name: "Siemens", t2b: 0.785, t1b: 0.413, mean: 4.19, range: "A56:AW68" },
+      { name: "Haier", t2b: 0.698, t1b: 0.320, mean: 3.88, range: "A72:AW84" },
+    ];
+
+    const makeRatingTable = (id: string, qNum: string, stem: string, brand: string, range: string, t2b: number, t1b: number, mean: number): ExtractedTable => {
+      const qTitle = `${qNum}. ${stem} - ${brand}`;
+      return {
+        extracted_table_id: id,
+        source_sheet: "Percentages_Sig1",
+        source_range: range,
+        detected_question_number: qNum,
+        detected_question_text: qTitle,
+        detected_table_title: qTitle,
+        table_variant: "percentage",
+        headers: [
+          { extracted_header_id: "h_01", display_label: "Total (A)", header_path: ["Total (A)"], significance_code: "A" },
+          { extracted_header_id: "h_02", display_label: "Male (B)", header_path: ["Gender", "Male (B)"], significance_code: "B" },
+          { extracted_header_id: "h_03", display_label: "Female (C)", header_path: ["Gender", "Female (C)"], significance_code: "C" },
+        ],
+        rows: [
+          {
+            extracted_row_id: `${id}_r0`,
+            original_label: "Base: All respondents",
+            detected_row_type: "base",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B1", raw_value: 1200, excel_display_value: "1200", parsed_value: 1200, parsed_unit: "count", original_significance_marker: "", significance_mapping_status: "not_applicable" },
+              { extracted_header_id: "h_02", source_cell: "D1", raw_value: 580, excel_display_value: "580", parsed_value: 580, parsed_unit: "count", original_significance_marker: "", significance_mapping_status: "not_applicable" },
+              { extracted_header_id: "h_03", source_cell: "F1", raw_value: 620, excel_display_value: "620", parsed_value: 620, parsed_unit: "count", original_significance_marker: "", significance_mapping_status: "not_applicable" },
+            ]
+          },
+          {
+            extracted_row_id: `${id}_r1`,
+            original_label: "5 - Completely meets needs",
+            detected_row_type: "data",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B2", raw_value: t1b, excel_display_value: `${(t1b * 100).toFixed(1)}%`, parsed_value: t1b, parsed_unit: "percentage", original_significance_marker: "", significance_mapping_status: "mapped" },
+            ]
+          },
+          {
+            extracted_row_id: `${id}_r2`,
+            original_label: "4 - Meets needs",
+            detected_row_type: "data",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B3", raw_value: t2b - t1b, excel_display_value: `${((t2b - t1b) * 100).toFixed(1)}%`, parsed_value: t2b - t1b, parsed_unit: "percentage", original_significance_marker: "", significance_mapping_status: "mapped" },
+            ]
+          },
+          {
+            extracted_row_id: `${id}_r3`,
+            original_label: "3 - Neutral",
+            detected_row_type: "data",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B4", raw_value: 0.12, excel_display_value: "12.0%", parsed_value: 0.12, parsed_unit: "percentage", original_significance_marker: "", significance_mapping_status: "mapped" },
+            ]
+          },
+          {
+            extracted_row_id: `${id}_r4`,
+            original_label: "2 - Somewhat meets",
+            detected_row_type: "data",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B5", raw_value: 0.05, excel_display_value: "5.0%", parsed_value: 0.05, parsed_unit: "percentage", original_significance_marker: "", significance_mapping_status: "mapped" },
+            ]
+          },
+          {
+            extracted_row_id: `${id}_r5`,
+            original_label: "1 - Does not meet",
+            detected_row_type: "data",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B6", raw_value: 0.02, excel_display_value: "2.0%", parsed_value: 0.02, parsed_unit: "percentage", original_significance_marker: "", significance_mapping_status: "mapped" },
+            ]
+          },
+          // 箱体指标 Top 2 Box、Top 1 Box
+          {
+            extracted_row_id: `${id}_r_t2b`,
+            original_label: "Top 2 Box (4+5)",
+            detected_row_type: "subtotal",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B7", raw_value: t2b, excel_display_value: `${(t2b * 100).toFixed(1)}%`, parsed_value: t2b, parsed_unit: "percentage", original_significance_marker: "", significance_mapping_status: "mapped" },
+            ]
+          },
+          {
+            extracted_row_id: `${id}_r_t1b`,
+            original_label: "Top 1 Box (5)",
+            detected_row_type: "subtotal",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B8", raw_value: t1b, excel_display_value: `${(t1b * 100).toFixed(1)}%`, parsed_value: t1b, parsed_unit: "percentage", original_significance_marker: "", significance_mapping_status: "mapped" },
+            ]
+          },
+          // 统计汇总行：Mean, Median, Std Dev, Std Err
+          {
+            extracted_row_id: `${id}_r_mean`,
+            original_label: "Mean",
+            detected_row_type: "subtotal",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B9", raw_value: mean, excel_display_value: mean.toFixed(2), parsed_value: mean, parsed_unit: "score", original_significance_marker: "", significance_mapping_status: "mapped" },
+            ]
+          },
+          {
+            extracted_row_id: `${id}_r_median`,
+            original_label: "Median",
+            detected_row_type: "subtotal",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B10", raw_value: 4.0, excel_display_value: "4.00", parsed_value: 4.0, parsed_unit: "score", original_significance_marker: "", significance_mapping_status: "mapped" },
+            ]
+          },
+          {
+            extracted_row_id: `${id}_r_stddev`,
+            original_label: "Std Dev",
+            detected_row_type: "subtotal",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B11", raw_value: 0.82, excel_display_value: "0.82", parsed_value: 0.82, parsed_unit: "score", original_significance_marker: "", significance_mapping_status: "mapped" },
+            ]
+          },
+          {
+            extracted_row_id: `${id}_r_stderr`,
+            original_label: "Std Err",
+            detected_row_type: "subtotal",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B12", raw_value: 0.024, excel_display_value: "0.024", parsed_value: 0.024, parsed_unit: "score", original_significance_marker: "", significance_mapping_status: "mapped" },
+            ]
+          },
+          // 汇总行：Sigma 100%
+          {
+            extracted_row_id: `${id}_r_sigma`,
+            original_label: "Sigma",
+            detected_row_type: "subtotal",
+            cells: [
+              { extracted_header_id: "h_01", source_cell: "B13", raw_value: 1.0, excel_display_value: "100.0%", parsed_value: 1.0, parsed_unit: "percentage", original_significance_marker: "", significance_mapping_status: "not_applicable" },
+            ]
+          }
+        ]
+      };
+    };
+
+    // 第一组题：Q017. Meets_needs (Bosch, LG, Siemens, Haier)
+    brands.forEach((b, idx) => {
+      sampleTables.push(
+        makeRatingTable(`tbl_q017_${idx + 1}`, "Q017", "Meets_needs", b.name, b.range, b.t2b, b.t1b, b.mean)
+      );
+    });
+
+    // 第二组题：Q018. Reliability (Bosch, LG, Siemens, Haier)
+    const relOffsets = [
+      { name: "Bosch", t2b: 0.865, t1b: 0.520, mean: 4.42, range: "A90:AW102" },
+      { name: "LG", t2b: 0.760, t1b: 0.395, mean: 4.10, range: "A106:AW118" },
+      { name: "Siemens", t2b: 0.840, t1b: 0.480, mean: 4.35, range: "A122:AW134" },
+      { name: "Haier", t2b: 0.725, t1b: 0.340, mean: 3.96, range: "A138:AW150" },
+    ];
+    relOffsets.forEach((b, idx) => {
+      sampleTables.push(
+        makeRatingTable(`tbl_q018_${idx + 1}`, "Q018", "Reliability", b.name, b.range, b.t2b, b.t1b, b.mean)
+      );
+    });
   }
 
   const initialProjectId = "prj_kantar_brand_study";
