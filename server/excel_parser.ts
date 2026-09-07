@@ -93,7 +93,16 @@ export async function parseExcelWorkbook(filePath: string, versionId: string): P
     // Data rows
     // "Table No: X / Y" or next Top Break
 
-    // First scan to find table segments
+    // Multi-pass scan:
+    // 1. Check for Quantum #page markers
+    const pageRows: number[] = [];
+    for (let r = 1; r <= rowCount; r++) {
+      const cellA = getCellSafeText(worksheet.getRow(r).getCell(1)).trim();
+      if (cellA === "#page") {
+        pageRows.push(r);
+      }
+    }
+
     interface RawSegment {
       bannerStartRow: number;
       bannerEndRow: number;
@@ -106,80 +115,131 @@ export async function parseExcelWorkbook(filePath: string, versionId: string): P
     }
 
     const segments: RawSegment[] = [];
-    let currentBannerStart = -1;
-    let currentQuestionRow = -1;
-    let currentQuestionText = "";
-    let currentQuestionNum = "";
-    let currentBaseRow = -1;
-    let currentDataStart = -1;
 
-    for (let r = 1; r <= rowCount; r++) {
-      const row = worksheet.getRow(r);
-      const cellA = getCellSafeText(row.getCell(1)).trim();
+    if (pageRows.length > 0) {
+      // Quantum crosstab partitioned by #page
+      for (let i = 0; i < pageRows.length; i++) {
+        const startRow = pageRows[i];
+        const endRow = i + 1 < pageRows.length ? pageRows[i + 1] - 1 : rowCount;
 
-      // Check if this row is "Top Break:"
-      if (/^Top Break:/i.test(cellA)) {
-        currentBannerStart = r + 1; // banners start on next row
-      }
+        let qRow = -1;
+        let qText = "";
+        let qNum = "";
+        let bRow = -1;
 
-      // Check if this row is a Question row (e.g. "S1. Country", "Q1. Awareness", "Table No:")
-      const isQMatch = cellA.match(/^([A-Za-z]{1,4}\d{1,4}[A-Za-z]?|[A-Za-z]+\s*\d+)[\s:：.-]\s*(.+)/i);
-      const isTableNo = /^Table No:\s*(\d+)/i.test(cellA);
-
-      if (isQMatch && !/^Table No:/i.test(cellA)) {
-        // If we were already collecting a segment, close it
-        if (currentQuestionRow > 0 && currentDataStart > 0) {
-          segments.push({
-            bannerStartRow: currentBannerStart > 0 ? currentBannerStart : currentQuestionRow - 4,
-            bannerEndRow: currentQuestionRow - 1,
-            questionRow: currentQuestionRow,
-            baseRow: currentBaseRow,
-            dataStartRow: currentDataStart,
-            dataEndRow: r - 1,
-            questionText: currentQuestionText,
-            questionNum: currentQuestionNum,
-          });
+        for (let r = startRow + 1; r <= endRow; r++) {
+          const cellA = getCellSafeText(worksheet.getRow(r).getCell(1)).trim();
+          if (
+            !qText &&
+            cellA &&
+            cellA !== "#page" &&
+            !cellA.startsWith("____") &&
+            !cellA.startsWith("Proportions/Means") &&
+            !cellA.startsWith("Overlap formulae")
+          ) {
+            qRow = r;
+            qText = cellA;
+            const qMatch = cellA.match(/^([A-Za-z0-9_]{1,30})[\s\.:：-]\s*(.+)/i);
+            qNum = qMatch ? qMatch[1].toUpperCase() : `Q${i + 1}`;
+          } else if (
+            /^Base\s*[:：=]/i.test(cellA) ||
+            /^Base\b/i.test(cellA) ||
+            /^Unweighted Base/i.test(cellA) ||
+            (/^Total\b/i.test(cellA) && bRow === -1 && qRow > 0)
+          ) {
+            bRow = r;
+            break;
+          }
         }
 
-        currentQuestionRow = r;
-        currentQuestionNum = isQMatch[1].toUpperCase();
-        currentQuestionText = cellA;
-        currentBaseRow = -1;
-        currentDataStart = -1;
-      } else if (/^Base\s*[:：]/i.test(cellA) || /^Base\b/i.test(cellA)) {
-        currentBaseRow = r;
-        currentDataStart = r + 1;
-      } else if (isTableNo) {
-        // Table No ends the current segment's data
-        if (currentQuestionRow > 0 && currentDataStart > 0) {
+        if (qRow > 0) {
+          const bannerStart = qRow + 1;
+          const bannerEnd = bRow > bannerStart ? bRow - 1 : bannerStart;
+          const dataStart = bRow > 0 ? bRow + 1 : bannerEnd + 1;
           segments.push({
-            bannerStartRow: currentBannerStart > 0 ? currentBannerStart : currentQuestionRow - 4,
-            bannerEndRow: currentQuestionRow - 1,
-            questionRow: currentQuestionRow,
-            baseRow: currentBaseRow,
-            dataStartRow: currentDataStart,
-            dataEndRow: r - 1,
-            questionText: currentQuestionText,
-            questionNum: currentQuestionNum,
+            bannerStartRow: bannerStart,
+            bannerEndRow: bannerEnd,
+            questionRow: qRow,
+            baseRow: bRow,
+            dataStartRow: dataStart,
+            dataEndRow: endRow,
+            questionText: qText,
+            questionNum: qNum,
           });
-          currentQuestionRow = -1;
+        }
+      }
+    } else {
+      // Decipher / Kantar or standard crosstabs
+      let currentBannerStart = -1;
+      let currentQuestionRow = -1;
+      let currentQuestionText = "";
+      let currentQuestionNum = "";
+      let currentBaseRow = -1;
+      let currentDataStart = -1;
+
+      for (let r = 1; r <= rowCount; r++) {
+        const row = worksheet.getRow(r);
+        const cellA = getCellSafeText(row.getCell(1)).trim();
+
+        if (/^Top Break:/i.test(cellA)) {
+          currentBannerStart = r + 1;
+        }
+
+        const isQMatch = cellA.match(/^([A-Za-z0-9_]{1,30})[\s\.:：-]\s*(.+)/i);
+        const isTableNo = /^Table No:\s*(\d+)/i.test(cellA);
+
+        if (isQMatch && !/^Table No:/i.test(cellA) && !/^Base\b/i.test(cellA) && !/^Total\b/i.test(cellA)) {
+          if (currentQuestionRow > 0 && currentDataStart > 0) {
+            segments.push({
+              bannerStartRow: currentBannerStart > 0 ? currentBannerStart : Math.max(1, currentQuestionRow - 4),
+              bannerEndRow: currentQuestionRow - 1,
+              questionRow: currentQuestionRow,
+              baseRow: currentBaseRow,
+              dataStartRow: currentDataStart,
+              dataEndRow: r - 1,
+              questionText: currentQuestionText,
+              questionNum: currentQuestionNum,
+            });
+          }
+
+          currentQuestionRow = r;
+          currentQuestionNum = isQMatch[1].toUpperCase();
+          currentQuestionText = cellA;
+          currentBaseRow = -1;
           currentDataStart = -1;
+        } else if (/^Base\s*[:：=]/i.test(cellA) || /^Base\b/i.test(cellA) || /^Unweighted Base/i.test(cellA)) {
+          currentBaseRow = r;
+          currentDataStart = r + 1;
+        } else if (isTableNo) {
+          if (currentQuestionRow > 0 && currentDataStart > 0) {
+            segments.push({
+              bannerStartRow: currentBannerStart > 0 ? currentBannerStart : Math.max(1, currentQuestionRow - 4),
+              bannerEndRow: currentQuestionRow - 1,
+              questionRow: currentQuestionRow,
+              baseRow: currentBaseRow,
+              dataStartRow: currentDataStart,
+              dataEndRow: r - 1,
+              questionText: currentQuestionText,
+              questionNum: currentQuestionNum,
+            });
+            currentQuestionRow = -1;
+            currentDataStart = -1;
+          }
         }
       }
-    }
 
-    // Close last segment if remaining
-    if (currentQuestionRow > 0 && currentDataStart > 0) {
-      segments.push({
-        bannerStartRow: currentBannerStart > 0 ? currentBannerStart : currentQuestionRow - 4,
-        bannerEndRow: currentQuestionRow - 1,
-        questionRow: currentQuestionRow,
-        baseRow: currentBaseRow,
-        dataStartRow: currentDataStart,
-        dataEndRow: rowCount,
-        questionText: currentQuestionText,
-        questionNum: currentQuestionNum,
-      });
+      if (currentQuestionRow > 0 && currentDataStart > 0) {
+        segments.push({
+          bannerStartRow: currentBannerStart > 0 ? currentBannerStart : Math.max(1, currentQuestionRow - 4),
+          bannerEndRow: currentQuestionRow - 1,
+          questionRow: currentQuestionRow,
+          baseRow: currentBaseRow,
+          dataStartRow: currentDataStart,
+          dataEndRow: rowCount,
+          questionText: currentQuestionText,
+          questionNum: currentQuestionNum,
+        });
+      }
     }
 
     // If standard crosstab detection found segments, process them
@@ -192,14 +252,39 @@ export async function parseExcelWorkbook(filePath: string, versionId: string): P
         const checkRow = worksheet.getRow(seg.baseRow > 0 ? seg.baseRow : seg.dataStartRow);
         const maxCol = Math.max(checkRow.actualCellCount, 35);
 
-        // Build multi-level header paths from banner rows
+        // Build multi-level header paths from banner rows with horizontal propagation for merged cells
         const bannerStart = Math.max(1, seg.bannerStartRow);
         const bannerEnd = Math.max(bannerStart, seg.bannerEndRow);
 
+        // Pre-propagate merged banner cells across columns
+        const bannerGrid: string[][] = [];
+        for (let br = bannerStart; br <= bannerEnd; br++) {
+          const rowVals: string[] = [];
+          let lastVal = "";
+          for (let c = 1; c <= maxCol; c++) {
+            const txt = getCellSafeText(worksheet.getRow(br).getCell(c)).trim();
+            if (txt && !txt.startsWith("____") && !txt.startsWith("Proportions/Means")) {
+              lastVal = txt;
+              rowVals[c] = txt;
+            } else if (lastVal && c > 1) {
+              // Check if worksheet has merged cells covering (br, c)
+              const cell = worksheet.getRow(br).getCell(c);
+              if (cell.isMerged) {
+                rowVals[c] = lastVal;
+              } else {
+                rowVals[c] = "";
+              }
+            } else {
+              rowVals[c] = "";
+            }
+          }
+          bannerGrid.push(rowVals);
+        }
+
         for (let col = 2; col <= maxCol; col++) {
           const pathParts: string[] = [];
-          for (let br = bannerStart; br <= bannerEnd; br++) {
-            const txt = getCellSafeText(worksheet.getRow(br).getCell(col)).trim();
+          for (const rowVals of bannerGrid) {
+            const txt = rowVals[col] || "";
             if (txt && !pathParts.includes(txt)) {
               pathParts.push(txt);
             }
@@ -208,7 +293,8 @@ export async function parseExcelWorkbook(filePath: string, versionId: string): P
           if (pathParts.length === 0) {
             // Check base or data row to see if this column has values
             const baseTxt = seg.baseRow > 0 ? getCellSafeText(worksheet.getRow(seg.baseRow).getCell(col)).trim() : "";
-            if (!baseTxt) continue;
+            const sampleDataTxt = getCellSafeText(worksheet.getRow(seg.dataStartRow).getCell(col)).trim();
+            if (!baseTxt && !sampleDataTxt) continue;
             pathParts.push(`Column ${col}`);
           }
 
@@ -270,14 +356,62 @@ export async function parseExcelWorkbook(filePath: string, versionId: string): P
           });
         }
 
-        // Add Data Rows
+        // Add Data Rows (and handle Quantum following-row significance)
+        let lastDataRow: ParsedRow | null = null;
+
         for (let r = seg.dataStartRow; r <= seg.dataEndRow; r++) {
           const row = worksheet.getRow(r);
           const cellA = getCellSafeText(row.getCell(1)).trim();
-          if (!cellA || /^Table No:/i.test(cellA) || /^Top Break:/i.test(cellA)) continue;
 
+          // Check if this row is a Quantum significance marker row (Col A is empty, but cols have uppercase letter codes)
+          if (!cellA && lastDataRow) {
+            let hasSigLetters = false;
+            headers.forEach((header) => {
+              let colNum = 2;
+              for (const [cNum, hObj] of colMap.entries()) {
+                if (hObj === header) {
+                  colNum = cNum;
+                  break;
+                }
+              }
+              const txt = getCellSafeText(row.getCell(colNum)).trim();
+              if (/^[A-Za-z/]+$/.test(txt)) {
+                hasSigLetters = true;
+                const prevCell = lastDataRow!.cells.find((c) => c.extracted_header_id === header.extracted_header_id);
+                if (prevCell) {
+                  prevCell.original_significance_marker = txt;
+                  prevCell.significance_mapping_status = "mapped";
+                }
+              }
+            });
+            if (hasSigLetters) {
+              continue; // Successfully attached to previous data row
+            }
+          }
+
+          if (!cellA || /^Table No:/i.test(cellA) || /^Top Break:/i.test(cellA) || cellA.startsWith("____") || cellA.startsWith("Proportions/Means")) {
+            continue;
+          }
+
+          const normA = cellA.toLowerCase();
           let rowType: "base" | "data" | "subtotal" | "header" = "data";
-          if (/^Sigma\b/i.test(cellA) || /^NET\s*[:：]/i.test(cellA) || /^Total\b/i.test(cellA) || /Subtotal/i.test(cellA)) {
+          if (
+            normA === "sigma" ||
+            normA.startsWith("sigma") ||
+            normA.includes("sigma") ||
+            normA.includes("σ") ||
+            normA.includes("∑") ||
+            normA.startsWith("net") ||
+            normA.startsWith("total") ||
+            normA.startsWith("mean") ||
+            normA.startsWith("median") ||
+            normA.startsWith("std dev") ||
+            normA.startsWith("average") ||
+            normA.includes("subtotal") ||
+            normA === "总计" ||
+            normA === "合计" ||
+            normA === "均值"
+          ) {
             rowType = "subtotal";
           }
 
@@ -300,27 +434,40 @@ export async function parseExcelWorkbook(filePath: string, versionId: string): P
 
             if (typeof cellText === "string") {
               const sigMatch = cellText.match(/([A-Za-z]+(\/[A-Za-z]+)?)\s*$/);
-              if (sigMatch && !/^Total/i.test(cellText)) {
+              if (sigMatch && !/^Total/i.test(cellText) && !/^Base/i.test(cellText)) {
                 sigMarker = sigMatch[1];
               }
             }
 
-            if (typeof rawVal === "number") {
+            if (cellText === "-" || cellText === "•" || cellText === "*") {
+              parsedVal = 0;
+            } else if (typeof rawVal === "number") {
               if (rawVal > 1.0) {
-                parsedVal = rawVal / 100; // In standard crosstabs, 40 means 40%
+                parsedVal = rawVal / 100;
+              } else {
+                parsedVal = rawVal;
               }
             } else if (typeof cellText === "string" && cellText.length > 0) {
               const cleanNum = parseFloat(cellText.replace(/[^\d.-]/g, ""));
               if (!isNaN(cleanNum)) {
-                parsedVal = cleanNum > 1.0 ? cleanNum / 100 : cleanNum;
+                if (cellText.includes("%") || cleanNum > 1.0) {
+                  parsedVal = cleanNum / 100;
+                } else {
+                  parsedVal = cleanNum;
+                }
               }
+            }
+
+            let displayVal = cellText;
+            if (!displayVal && typeof parsedVal === "number") {
+              displayVal = `${(parsedVal * 100).toFixed(1)}%`;
             }
 
             cells.push({
               extracted_header_id: header.extracted_header_id,
               source_cell: cell.address,
               raw_value: rawVal ?? null,
-              excel_display_value: cellText || String(rawVal ?? ""),
+              excel_display_value: displayVal || String(rawVal ?? ""),
               parsed_value: parsedVal ?? null,
               parsed_unit: parsedUnit,
               original_significance_marker: sigMarker,
@@ -328,12 +475,19 @@ export async function parseExcelWorkbook(filePath: string, versionId: string): P
             });
           });
 
-          rows.push({
+          const newRow: ParsedRow = {
             extracted_row_id: `r_${versionId}_${globalTableIndex}_${r}`,
             original_label: cellA,
             detected_row_type: rowType,
             cells,
-          });
+          };
+          rows.push(newRow);
+
+          if (rowType === "data") {
+            lastDataRow = newRow;
+          } else {
+            lastDataRow = null;
+          }
         }
 
         if (rows.length > 0) {
